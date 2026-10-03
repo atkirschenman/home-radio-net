@@ -1,6 +1,6 @@
 # 01 — Home radio network: architecture
 
-*Version 0.2, 2026-10-03. The shared 915 MHz radio architecture for every battery/solar node Andrew builds, and the one indoor gateway that bridges them to Home Assistant. Anything marked **Proposed** is not decided until the owner accepts it. Change log at the end.*
+*Version 0.3, 2026-10-03. The shared 915 MHz radio architecture for every battery/solar node Andrew builds, and the one indoor gateway that bridges them to Home Assistant. Anything marked **Proposed** is not decided until the owner accepts it. Change log at the end.*
 
 ## 1. Who uses it
 
@@ -19,9 +19,9 @@
 | N-2 | **Shared repo** (`home-radio-net`) holds the protocol spec, a portable C library and the ESPHome gateway component. Projects consume it as a **git submodule** | **Decided** (owner, 2026-10-03) |
 | N-3 | **Every frame from every node is authenticated** (AES-128-CMAC + replay counter), in both directions | **Decided** (owner, 2026-10-03) |
 | N-4 | Gateway = ESP32 + 915 MHz CC1101 module + ESPHome's `cc1101` component (feasibility: `smart-garden-system/docs/03-radio-link.md`) | **Decided** (weather_station spec section 4; garden D-5) |
-| N-5 – N-12 | PHY parameters, frame format, keys, counters, MAC, message set, code layout, Home Assistant representation (sections 3–10) | Proposed |
+| N-5 – N-12 | PHY (918.5 MHz), frame format, keys, counters, MAC, message set, code layout, Home Assistant representation (sections 3–10) | **Decided** (owner, 2026-10-03) |
 
-## 3. PHY (Proposed, N-5)
+## 3. PHY (N-5, decided)
 
 | Parameter | Value | Why |
 |---|---|---|
@@ -31,7 +31,7 @@
 | Packet | **Variable length** (length byte), ≤ 61 bytes payload (one FIFO), **CRC-16 on**, **whitening on** | Variable length lets every node type share one config; CRC drops corrupted frames in hardware |
 | TX power | Capped per node for FCC 15.249 (~−1 dBm EIRP; the cap depends on each antenna) | Same rule as weather_station 3.2; the gateway is capped too |
 
-## 4. Frame format (Proposed, N-6)
+## 4. Frame format (N-6, decided)
 
 Inside the CC1101 payload, little-endian:
 
@@ -53,7 +53,7 @@ Inside the CC1101 payload, little-endian:
 
 **Duplicates:** the weather station's 2–3 repeats carry the **same** `ctr` and identical bytes. The gateway accepts the first and drops the rest silently.
 
-## 5. Security (N-3 decided; details Proposed, N-7)
+## 5. Security (N-3, N-7, decided)
 
 ### 5.1 Keys
 - **One 128-bit master key per home**, held only by the gateway (ESPHome `secrets.yaml`).
@@ -65,7 +65,7 @@ Inside the CC1101 payload, little-endian:
 - **Persistence without flash wear:** the node writes its counter to EEPROM every 256 frames. On boot it resumes at stored + 256, so a reboot never reuses a value. The gateway does the same in ESP32 NVS per node.
 - At the garden's 1 frame / 3 s, a 32-bit counter lasts > 400 years.
 
-## 6. Medium access (Proposed, N-8)
+## 6. Medium access (N-8, decided)
 
 ### 6.1 Uplink: unslotted ALOHA with jitter
 Nodes transmit on their own schedule with ±10 % random jitter on the period, so two nodes never stay synchronised. No listen-before-talk; the load is too low to need it (6.4).
@@ -88,7 +88,7 @@ Nodes transmit on their own schedule with ±10 % random jitter on the period, so
 ### 6.4 Channel load (sanity check)
 Garden 1 × 11 ms / 3 s + weather 2 stations × 3 × 11 ms / 60 s + 10 soil nodes × 11 ms / 300 s ≈ **0.5 % channel occupancy**. Pure-ALOHA collision probability per frame ≈ 1 %. Retries and repeats absorb that. Fine up to dozens of nodes.
 
-## 7. Message set (Proposed, N-9)
+## 7. Message set (N-9, decided)
 
 | `msg_type` | Dir | Who | Payload (sketch) |
 |---|---|---|---|
@@ -102,7 +102,7 @@ Garden 1 × 11 ms / 3 s + weather 2 stations × 3 × 11 ms / 60 s + 10 soil node
 | 0x23 `GARDEN_EVENT` | up | garden | State change / fault, `ACK_REQ` |
 | 0x30 `SOIL_REPORT` | up | soil | Moisture raw + calibrated, soil temperature, … (defined with the soil project) |
 
-## 8. Code layout (Proposed, N-10)
+## 8. Code layout (N-10, decided)
 
 ```
 home-radio-net/
@@ -123,13 +123,13 @@ home-radio-net/
 - The component **replies from its own packet listener**, not via a YAML `on_packet` automation, to keep the downlink inside the node's 120 ms window (`smart-garden-system/docs/03-radio-link.md`).
 - **Node registry** in the gateway YAML: `node_id`, `node_type`, name. Entities are created per type. Unknown nodes are logged, not exposed.
 
-## 9. Hardware commonality (Proposed, N-11)
+## 9. Hardware commonality (N-11, decided)
 
 - **"Radio core"** = STM32L0 (L051C8T6 or family) + 32.768 kHz LSE + E07-900MM10S + π-network to U.FL/wire pad + Tag-Connect SWD. weather_station's core sheet already has it, and the garden board (ADR-0002) uses the same parts.
 - **Proposed:** extract it as a **shared KiCad hierarchical sheet** in this repo once the soil monitor starts, so all three boards share one radio layout and one fix point. Not urgent: the weather and garden schematics can draw it now and converge later.
 - Soil monitors: same radio core; MCU possibly a smaller L0 if pins allow; small solar + storage like weather_station. Defined in their own project.
 
-## 10. How the nodes appear in Home Assistant (Proposed, N-12)
+## 10. How the nodes appear in Home Assistant (N-12, decided)
 
 **One receiver, many devices: ESPHome sub-devices.** ESPHome lets one node declare several logical devices (`esphome: devices:`). Each entity is attached to one of them with `device_id:`. Home Assistant then shows **one device per node**, each with its own entities and area, all reached through the single gateway. This is the pattern ESPHome documents for RF bridges.
 
@@ -198,17 +198,18 @@ No open standard fits **CC1101 + years-on-small-solar + an ESPHome gateway** off
 
 **What we do instead: copy LoRaWAN's proven ideas onto our PHY.** The frame counter per direction, the 4-byte AES-CMAC MIC, per-device keys derived from a root key, and "class A" receive windows after an uplink all come from LoRaWAN, which has a decade of field and security review behind them. We skip its join procedure, adaptive data rate, multi-channel hopping and network server, none of which a one-gateway home network needs. If the CC1101's range ever falls short, the upgrade path is SX1262 + real LoRaWAN, and the message set (section 7) carries over unchanged.
 
-## 13. Open questions, with proposals
+## 13. Former open questions (all accepted 2026-10-03)
 
 | ID | Question | Proposal |
 |---|---|---|
-| O-1 | Channel frequency | **918.5 MHz.** It sits in the gap between LoRaWAN US915 uplinks (902.3–914.9 MHz) and downlinks (923.3–927.5 MHz), and between Z-Wave's 916.0 MHz classic and 920 MHz Long-Range channels. Keep it a single config constant so it can move if a neighbour turns out to sit on it |
-| O-2 | MIC length | **4 bytes**, as LoRaWAN. Replays are blocked by the counter; a forger gets one 2⁻³² guess per frame on air |
-| O-3 | Soil monitors | **Every 10 min, `RX_OPEN` on every report**, 5–10 nodes, small solar (owner). Sensor and distances defined in their own project. Channel load stays < 1 % |
-| O-4 | Key provisioning | A **host script** (in this repo) reads a node manifest (`node_id`, type, name), derives the node key from the master key, and writes `node_id` + key into the STM32's **data EEPROM** over SWD (`st-flash` / OpenOCD) after flashing firmware. The firmware image stays identical for every node of a type. The same manifest generates the gateway's `nodes:` / `devices:` YAML, so the two can't drift |
-| O-5 | Second gateway | **Not now.** The frame format already allows it: dedup is by `(node_id, ctr)`, so two gateways receiving the same frame is harmless. Only downlinks would need coordination (one gateway answers). Revisit if coverage ever needs it |
+| O-1 | Channel frequency | **Accepted: 918.5 MHz.** It sits in the gap between LoRaWAN US915 uplinks (902.3–914.9 MHz) and downlinks (923.3–927.5 MHz), and between Z-Wave's 916.0 MHz classic and 920 MHz Long-Range channels. Keep it a single config constant so it can move if a neighbour turns out to sit on it |
+| O-2 | MIC length | **Accepted: 4 bytes**, as LoRaWAN. Replays are blocked by the counter; a forger gets one 2⁻³² guess per frame on air |
+| O-3 | Soil monitors | **Accepted: every 10 min, `RX_OPEN` on every report**, 5–10 nodes, small solar (owner). Sensor and distances defined in their own project. Channel load stays < 1 % |
+| O-4 | Key provisioning | **Accepted:** a **host script** (in this repo) reads a node manifest (`node_id`, type, name), derives the node key from the master key, and writes `node_id` + key into the STM32's **data EEPROM** over SWD (`st-flash` / OpenOCD) after flashing firmware. The firmware image stays identical for every node of a type. The same manifest generates the gateway's `nodes:` / `devices:` YAML, so the two can't drift |
+| O-5 | Second gateway | **Accepted: not now.** The frame format already allows it: dedup is by `(node_id, ctr)`, so two gateways receiving the same frame is harmless. Only downlinks would need coordination (one gateway answers). Revisit if coverage ever needs it |
 
 ## Change log
 
 - **0.1 (2026-10-03):** First draft. N-1–N-4 decided by the owner; N-5–N-11 proposed.
 - **0.2 (2026-10-03):** Added section 10 (Home Assistant: one device per node via ESPHome sub-devices), section 12 (prior art / open standards: LoRaWAN ideas on a CC1101 PHY), proposals for O-1–O-5 (918.5 MHz, 4-byte MIC, soil every 10 min, manifest-driven key provisioning, second gateway later). weather_station noted in its repo (its spec v2.12).
+- **0.3 (2026-10-03):** Owner accepted all proposals: N-5–N-12 decided; O-1–O-5 accepted (918.5 MHz, 4-byte MIC, soil every 10 min, manifest-driven provisioning, single gateway).
