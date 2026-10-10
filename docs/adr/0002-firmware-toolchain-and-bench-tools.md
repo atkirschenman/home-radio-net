@@ -86,11 +86,33 @@ The **linker script is our own** (64 KB flash, 8 KB RAM, data EEPROM at 0x0808_0
 
 | Need | Recommended | Why / alternative |
 |---|---|---|
-| **µA current (Stop current with LPTIM running, CC1101 sleep, average over a report cycle)** | **Nordic Power Profiler Kit II** (~US$100) | Logs current from sub-µA to mA over time, so a whole 60 s cycle (sleep + 3 TX bursts) integrates to an average. A multimeter's µA range shows only a flickering average and adds burden voltage. Joulescope is better and ~US$1000 |
-| Adjustable supply 1.8–3.3 V (battery sweep, brown-out, charger FSM) | The PPK2 in source mode (0.8–5 V), or any bench supply | PPK2 covers it for the board alone; a separate supply is needed for the solar input (~5–6 V, current-limited) |
+| **µA current** | **The owner's INA219 module with its shunt changed** (owner, 2026-10-10: no new current meter). See "Current measurement with the INA219" below | A Nordic PPK2 (~US$100) is parked: it would only be bought if the INA219 method proves too coarse |
+| Adjustable supply 1.8–3.3 V (battery sweep, brown-out, charger FSM) | Any bench supply, or the NiMH pack itself | A separate current-limited ~5–6 V supply for the solar input |
 | Wind pulses 0.5–100 Hz | A NUCLEO's timer or a Raspberry Pi Pico producing open-drain pulses, or a function generator | Real cups afterwards |
 | RF on air at 918.5 MHz | RTL-SDR (spec R-7) + **SDR++** or **URH** to see bursts and timing; later our own Python sniffer (`tools/rnet_py`) | `rtl_433` can be taught the frame later; not needed for bring-up |
 | UART | V3MINIE VCP | See T6 |
+
+#### Current measurement with the INA219 (owner, 2026-10-10)
+
+The INA219's shunt-voltage register has a fixed 10 µV LSB. With the module's stock 0.1 Ω shunt that is **100 µA per count**, useless for a µA budget. Changing the shunt fixes the resolution:
+
+| Shunt | LSB | Full scale | Uncalibrated offset (10–100 µV) | Drop at ~18 mA (TX burst) | Use |
+|---|---|---|---|---|---|
+| 0.1 Ω (stock) | 100 µA | 3.2 A | 0.1–1 mA | 2 mV | Nothing here |
+| **10 Ω**, PGA ±320 mV | **1 µA** | 32 mA | 1–10 µA | 0.18 V (fine: TPS63900 runs down to 1.8 V) | **Whole report cycle, radio on** |
+| **100 Ω**, PGA ±40 mV | **0.1 µA** | 0.4 mA | 0.1–1 µA | would collapse the rail | **Sleep floor, radio disabled** |
+
+Method:
+
+- **Rework the module:** remove its 0.1 Ω (R100) and wire the shunt across VIN+/VIN−, high side in the battery lead to J101. A jumper (or a switch) **shorts the shunt during power-up**: the LSE start and boot draw mA, which would sag the rail through 100 Ω.
+- **Zero the offset before each run:** read the shunt register with the load disconnected and subtract it. That takes the 10 Ω range to about ±1 µA and the 100 Ω range to about ±0.1 µA.
+- **Sample continuously with 128× hardware averaging** (68 ms per result). Conversions run back to back, so summing the results over a whole 60 s cycle integrates the TX bursts (~11 ms each) as well as the sleep current. Bus voltage comes from the same chip, giving energy as well as charge.
+- **Two runs per firmware build:**
+  - 10 Ω, normal firmware → average current over several cycles (the budget number);
+  - 100 Ω, a bench build with the radio kept asleep → the Stop-mode floor with LPTIM and the 1 Hz wakeup (the "single-digit µA" check).
+- **What this can't do:** show the shape of a single burst (68 ms windows). Burst length comes from the RTL-SDR, and the CC1101 TX current from the datasheet cross-checked against the 10 Ω average.
+- **Reader:** any I²C host logging to a CSV. A small script lands in `tools/` with the bring-up work. **Still open:** which host the owner has spare (a Raspberry Pi, an ESP32 or Pico with MicroPython, or a NUCLEO).
+- **Parts:** 10 Ω and 100 Ω 0.1 % resistors (1 % is fine once the offset is zeroed; the tolerance is a gain error of the same size), a 2-pin jumper.
 
 ### Install commands (proposed, owner runs them; they need sudo)
 
@@ -104,5 +126,5 @@ OpenOCD's Ubuntu package installs udev rules for ST-LINK probes; replug the prob
 
 - `lib/node_l0` gets `cmake/arm-none-eabi.cmake` (with the GCC ≥ 13 check), the vendored ST files with `VERSIONS.md`, the linker script and OpenOCD configs; `.clang-format` and Unity land in this repo first and are reused by the node repos.
 - GitHub Actions workflows are added to home-radio-net (generator check, `lib/rnet` tests) and to each node repo (host tests + target builds).
-- Purchases for the owner (none bought yet): a probe (V3MINIE, or a NUCLEO-L053R8 if early silicon testing is wanted), jumper wires, later the TC2030-CTX-NL cable, and a PPK2 before the power-budget step.
+- Purchases for the owner (none bought yet): a probe (V3MINIE, or a NUCLEO-L053R8 if early silicon testing is wanted), jumper wires, later the TC2030-CTX-NL cable, and 10 Ω / 100 Ω resistors for the INA219 rework. No dedicated current meter (owner, 2026-10-10).
 - weather_station spec section 9 (Tooling) points here.
