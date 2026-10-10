@@ -1,6 +1,6 @@
 # ADR-0001: One protocol schema, generated code for every device
 
-- **Status:** Proposed (2026-10-09)
+- **Status:** Accepted (owner, 2026-10-10). Work-order step 1 (`schema/rnet.toml`) drafted, awaiting schema review
 - **Date:** 2026-10-09
 - **Affects:** every project: weather_station (node firmware), smart-garden-system (node firmware), soil monitors, the ESPHome gateway, host tools (provisioning, sniffer)
 - **Builds on:** `01-architecture.md` N-6 (frame format), N-9 (message set), N-10 (code layout), N-12 (Home Assistant representation)
@@ -35,7 +35,7 @@ Constraints from the decided architecture:
 | C header as the source (structs, parsed for the other targets) | No new language | No home for units/HA metadata; packed structs aren't portable between M0+ and Xtensa without care; parsing C from Python is fragile |
 | **Own schema file (TOML) + a small stdlib-only Python generator** | Matches N-6 exactly; carries the metadata; generates exactly the C, C++, Python and docs we need | We maintain ~500 lines of generator. **Recommended** |
 
-## Decision (proposed)
+## Decision
 
 ### D1: The schema is `schema/rnet.toml`, the single source of truth
 

@@ -1,6 +1,6 @@
 # 01 — Home radio network: architecture
 
-*Version 0.3, 2026-10-03. The shared 915 MHz radio architecture for every battery/solar node Andrew builds, and the one indoor gateway that bridges them to Home Assistant. Anything marked **Proposed** is not decided until the owner accepts it. Change log at the end.*
+*Version 0.6, 2026-10-10. The shared 915 MHz radio architecture for every battery/solar node Andrew builds, and the one indoor gateway that bridges them to Home Assistant. Anything marked **Proposed** is not decided until the owner accepts it. Change log at the end.*
 
 ## 1. Who uses it
 
@@ -123,7 +123,7 @@ home-radio-net/
                         (garden_run, garden_stop, node_config)
 ```
 
-- **Proposed (ADR-0001):** message definitions, PHY constants and node types live in one schema (`schema/rnet.toml`). A stdlib-only generator (`tools/rnetgen/`) emits the C, gateway, Python, Markdown and test-vector code from it; adds `schema/`, `tools/`, `test/vectors/` to this layout.
+- **Accepted (ADR-0001, 2026-10-10):** message definitions, PHY constants and node types live in one schema (`schema/rnet.toml`). A stdlib-only generator (`tools/rnetgen/`) emits the C, gateway, Python, Markdown and test-vector code from it; adds `schema/`, `tools/`, `test/vectors/` to this layout.
 - **The same C library runs on the STM32 nodes and inside the ESP32 component**, so both ends share one implementation and one set of test vectors. Software AES costs ~1 ms per frame on a 32 MHz Cortex-M0+, which is fine.
 - The component **replies from its own packet listener**, not via a YAML `on_packet` automation, to keep the downlink inside the node's 120 ms window (`smart-garden-system/docs/03-radio-link.md`).
 - **Node registry** in the gateway YAML: `node_id`, `node_type`, name. Entities are created per type. Unknown nodes are logged, not exposed.
@@ -220,3 +220,4 @@ No open standard fits **CC1101 + years-on-small-solar + an ESPHome gateway** off
 - **0.3 (2026-10-03):** Owner accepted all proposals: N-5–N-12 decided; O-1–O-5 accepted (918.5 MHz, 4-byte MIC, soil every 10 min, manifest-driven provisioning, single gateway).
 - **0.4 (2026-10-09):** ADR-0001 **Proposed**: one protocol schema (TOML) with generated code for nodes, gateway, host tools and docs; ESPHome gateway stub added to its work order.
 - **0.5 (2026-10-10):** `lib/node_l0/` added to the code layout (section 8): one STM32L0 platform and CC1101 driver for every node, from smart-garden-system ADR-0004 D2 (accepted). A change affecting every node project.
+- **0.6 (2026-10-10):** ADR-0001 **accepted** (owner). `schema/rnet.toml` drafted: frame, PHY, node types, `HEALTH`, `TIME`, `CONFIG_*`, and `WX_REPORT` (weather_station ADR-0003 step 0, accepted: 35-byte payload; weather housekeeping in an hourly `HEALTH` frame that sets `RX_OPEN`). Garden and soil messages are placeholders. Sync word 0xB54E proposed, pending schema review.

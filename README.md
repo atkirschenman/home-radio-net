@@ -11,8 +11,8 @@ Used by:
 
 ```
 docs/                       architecture spec (start with docs/01-architecture.md) and ADRs
-schema/                     (proposed, ADR-0001) rnet.toml: the single protocol definition
-tools/rnetgen/              (proposed) generator: C, gateway, Python, docs, test vectors
+schema/                     rnet.toml: the single protocol definition (ADR-0001)
+tools/rnetgen/              (to come) generator: C, gateway, Python, docs, test vectors
 lib/rnet/                   (to come) portable C library: frames, AES-CMAC, counters
 esphome/components/         (to come) ESPHome gateway component
 ```
