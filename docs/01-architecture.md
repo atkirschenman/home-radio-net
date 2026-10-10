@@ -112,6 +112,10 @@ home-radio-net/
                         counter/replay window, message structs
   lib/rnet/test/        host unit tests: RFC 4493 CMAC vectors, frame round-trips,
                         replay cases (runs in CI / on the PC)
+  lib/node_l0/          shared STM32L0 node platform (garden ADR-0004 D2): CMake toolchain,
+                        vendored ST LL/CMSIS, clocks (MSI + LSE), Stop entry/exit, RTC wakeup,
+                        IWDG, data-EEPROM wear-levelled ring, CC1101 driver (generated PHY
+                        registers), rnet glue (counter persistence, RX_OPEN window)
   esphome/components/radio_net/
                         ESPHome external component: wraps the cc1101 component,
                         uses lib/rnet, holds per-node state and downlink queues,
@@ -119,6 +123,7 @@ home-radio-net/
                         (garden_run, garden_stop, node_config)
 ```
 
+- **Proposed (ADR-0001):** message definitions, PHY constants and node types live in one schema (`schema/rnet.toml`). A stdlib-only generator (`tools/rnetgen/`) emits the C, gateway, Python, Markdown and test-vector code from it; adds `schema/`, `tools/`, `test/vectors/` to this layout.
 - **The same C library runs on the STM32 nodes and inside the ESP32 component**, so both ends share one implementation and one set of test vectors. Software AES costs ~1 ms per frame on a 32 MHz Cortex-M0+, which is fine.
 - The component **replies from its own packet listener**, not via a YAML `on_packet` automation, to keep the downlink inside the node's 120 ms window (`smart-garden-system/docs/03-radio-link.md`).
 - **Node registry** in the gateway YAML: `node_id`, `node_type`, name. Entities are created per type. Unknown nodes are logged, not exposed.
@@ -180,7 +185,7 @@ In Home Assistant:
 | Project | Change |
 |---|---|
 | weather_station | Packet format → this frame format (section 4) + CMAC + persisted counter. Adds an hourly `RX_OPEN` frame (time/config). The receiver work moves to `home-radio-net/esphome`. Its spec R-1 ("our own packet format") points here. **Not edited yet: awaiting the owner's OK** |
-| smart-garden-system | Spec 4.4 and `docs/03-radio-link.md` point here for the protocol; ADR-0002 is unaffected (same radio, same GDO0 use) |
+| smart-garden-system | Spec 4.4 and `docs/03-radio-link.md` point here for the protocol; ADR-0002 is unaffected (same radio, same GDO0 use). Its node firmware (ADR-0004, accepted 2026-10-10) links `lib/rnet` and `lib/node_l0` and needs the garden message fields in the schema |
 | Soil monitors | Start from this spec |
 
 ## 12. Prior art: is there an open standard we could just use?
@@ -213,3 +218,5 @@ No open standard fits **CC1101 + years-on-small-solar + an ESPHome gateway** off
 - **0.1 (2026-10-03):** First draft. N-1–N-4 decided by the owner; N-5–N-11 proposed.
 - **0.2 (2026-10-03):** Added section 10 (Home Assistant: one device per node via ESPHome sub-devices), section 12 (prior art / open standards: LoRaWAN ideas on a CC1101 PHY), proposals for O-1–O-5 (918.5 MHz, 4-byte MIC, soil every 10 min, manifest-driven key provisioning, second gateway later). weather_station noted in its repo (its spec v2.12).
 - **0.3 (2026-10-03):** Owner accepted all proposals: N-5–N-12 decided; O-1–O-5 accepted (918.5 MHz, 4-byte MIC, soil every 10 min, manifest-driven provisioning, single gateway).
+- **0.4 (2026-10-09):** ADR-0001 **Proposed**: one protocol schema (TOML) with generated code for nodes, gateway, host tools and docs; ESPHome gateway stub added to its work order.
+- **0.5 (2026-10-10):** `lib/node_l0/` added to the code layout (section 8): one STM32L0 platform and CC1101 driver for every node, from smart-garden-system ADR-0004 D2 (accepted). A change affecting every node project.
