@@ -1,0 +1,23 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {"major": 3, "minor": 25, "patch": 0},
+  "configurePresets": [
+    {"name": "host", "generator": "Ninja", "binaryDir": "build/host",
+     "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug"}},
+    {"name": "l0-debug", "generator": "Ninja", "binaryDir": "build/l0-debug",
+     "toolchainFile": "lib/node_l0/cmake/arm-none-eabi.cmake",
+     "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "CMAKE_C_FLAGS_DEBUG": "-Og -g3"}},
+    {"name": "l0-release", "generator": "Ninja", "binaryDir": "build/l0-release",
+     "toolchainFile": "lib/node_l0/cmake/arm-none-eabi.cmake",
+     "cacheVariables": {"CMAKE_BUILD_TYPE": "Release", "CMAKE_C_FLAGS_RELEASE": "-Os -g",
+                        "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "ON"}}
+  ],
+  "buildPresets": [
+    {"name": "host", "configurePreset": "host"},
+    {"name": "l0-debug", "configurePreset": "l0-debug"},
+    {"name": "l0-release", "configurePreset": "l0-release"}
+  ],
+  "testPresets": [
+    {"name": "host", "configurePreset": "host", "output": {"outputOnFailure": true}}
+  ]
+}

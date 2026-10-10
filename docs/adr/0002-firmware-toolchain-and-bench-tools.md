@@ -1,6 +1,6 @@
 # ADR-0002: Firmware toolchain, debug probe and bench tools for the STM32L0 nodes
 
-- **Status:** Proposed (2026-10-10)
+- **Status:** Accepted (owner, 2026-10-10: "let's start on the node code" after the review). Tools installed on the dev machine the same day; probe (HiLetgo ST-LINK/V2) in transit
 - **Date:** 2026-10-10
 - **Affects:** every node project that builds on `lib/node_l0` (weather_station, smart-garden-system, soil monitors) and this repo's generator, `lib/rnet` and gateway
 - **Builds on:** weather_station ADR-0003 D1 and smart-garden-system ADR-0004 D1 (both accepted: CMake + arm-none-eabi-gcc + ST LL/CMSIS, no HAL, no RTOS), this repo's ADR-0001 (schema + stdlib-only generator) and O-4 (provisioning over SWD)
@@ -21,7 +21,7 @@ What's on the development machine (Linux Mint 22 / Ubuntu 24.04, x86-64) on 2026
 
 Constraints: no breadboard stage (weather_station ADR-0003 D3), so the host tests and the first-board bring-up carry the risk; the µA budget has to be **measured**, not estimated; the boards expose SWD on a **Tag-Connect TC2030-NL** footprint (J3) and a **2.54 mm 1×5 header** (J5: 3V3, SWDIO, SWCLK, NRST, GND), plus a USART1 log header.
 
-## Decision (proposed)
+## Decision
 
 ### T1: Compiler: the distro `arm-none-eabi-gcc` 13.2, version-checked; Docker for CI
 
@@ -121,7 +121,7 @@ Method:
 - **Reader:** any I²C host logging to a CSV. A small script lands in `tools/` with the bring-up work. Which host reads it is chosen if the fallback is ever used.
 - **Parts:** 10 Ω and 100 Ω 0.1 % resistors (1 % is fine once the offset is zeroed; the tolerance is a gain error of the same size), a 2-pin jumper.
 
-### Install commands (proposed, owner runs them; they need sudo)
+### Install commands (done 2026-10-10)
 
 ```bash
 sudo apt install ninja-build openocd gdb-multiarch stlink-tools cppcheck tio pipx

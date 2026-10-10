@@ -1,6 +1,6 @@
 # 01 — Home radio network: architecture
 
-*Version 0.7, 2026-10-10. The shared 915 MHz radio architecture for every battery/solar node Andrew builds, and the one indoor gateway that bridges them to Home Assistant. Anything marked **Proposed** is not decided until the owner accepts it. Change log at the end.*
+*Version 0.9, 2026-10-10. The shared 915 MHz radio architecture for every battery/solar node Andrew builds, and the one indoor gateway that bridges them to Home Assistant. Anything marked **Proposed** is not decided until the owner accepts it. Change log at the end.*
 
 ## 1. Who uses it
 
@@ -229,3 +229,4 @@ No open standard fits **CC1101 + years-on-small-solar + an ESPHome gateway** off
 - **0.6 (2026-10-10):** ADR-0001 **accepted** (owner). `schema/rnet.toml` drafted: frame, PHY, node types, `HEALTH`, `TIME`, `CONFIG_*`, and `WX_REPORT` (weather_station ADR-0003 step 0, accepted: 35-byte payload; weather housekeeping in an hourly `HEALTH` frame that sets `RX_OPEN`). Garden and soil messages are placeholders. Sync word 0xB54E proposed, pending schema review. Stale "proposed" wording for O-1–O-3 (accepted in 0.3) removed; section 7 points at the schema; section 8 lists `schema/`, `tools/`, `test/vectors/`.
 - **0.7 (2026-10-10):** ADR-0002 **Proposed**: firmware toolchain, debug probe and bench tools for every STM32L0 node (distro GCC 13.2, CMake/Ninja presets, vendored ST LL/CMSIS, Unity + ctest, ST-LINK + OpenOCD). Current measurement deferred; the owner's INA219 module (10 Ω / 100 Ω shunt) is the fallback if a power problem shows up. Affects all node projects.
 - **0.8 (2026-10-10):** ADR-0002: probe = the owner's HiLetgo ST-LINK/V2 clone (SWDIO/SWCLK/GND/RST on the 2.54 mm header, no 3V3); USART1 log through a 3.3 V USB-UART, RTT as fallback; firmware rule: `DBG_STOP` in Debug builds and a ~2 s delay before the first Stop entry so SWD can always attach.
+- **0.9 (2026-10-10):** ADR-0002 **accepted**. `lib/node_l0` started: toolchain file, L051 linker script, vendored ST LL/CMSIS (pinned), EEPROM wear-levelled ring with host tests, clocks/RTC/Stop/IWDG/reset-cause/EEPROM/UART log (compile-checked), smoke image (2.3 KB). Root CMake presets and GitHub Actions CI added. CC1101 driver waits for the generator.

@@ -1,0 +1,9 @@
+# ADR-0002 T8. Copied into each node repo; vendored code is excluded.
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 100
+BreakBeforeBraces: Linux
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+PointerAlignment: Right
+SortIncludes: CaseSensitive

@@ -1,0 +1,21 @@
+# ADR-0002 T4: host tests (with sanitizers) and STM32L0 target builds.
+name: ci
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi cppcheck
+      - name: Host tests
+        run: |
+          cmake --preset host
+          cmake --build --preset host
+          ctest --preset host
+      - name: Target builds
+        run: |
+          cmake --preset l0-debug && cmake --build --preset l0-debug
+          cmake --preset l0-release && cmake --build --preset l0-release
+      - name: cppcheck (advisory)
+        run: cppcheck --enable=warning,style,performance --inline-suppr --quiet -I lib/node_l0/include lib/node_l0/src || true
