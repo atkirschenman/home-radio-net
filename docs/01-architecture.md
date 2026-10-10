@@ -25,7 +25,7 @@
 
 | Parameter | Value | Why |
 |---|---|---|
-| Band / channel | **915 MHz ISM, one fixed channel: 918.5 MHz proposed** (O-1, section 13) | One channel keeps the gateway simple; low traffic (section 6.4) |
+| Band / channel | **915 MHz ISM, one fixed channel: 918.5 MHz** (O-1, accepted) | One channel keeps the gateway simple; low traffic (section 6.4) |
 | Modulation | GFSK, **38.4 kbps**, deviation ~20 kHz, RX bandwidth ~100 kHz | weather_station spec R-2; ~10 ms per frame |
 | Preamble / sync | 4 bytes / **30-of-32 sync, our own sync word** (not the CC1101 default 0xD391) | Rejects other CC1101 products on the default word |
 | Packet | **Variable length** (length byte), ≤ 61 bytes payload (one FIFO), **CRC-16 on**, **whitening on** | Variable length lets every node type share one config; CRC drops corrupted frames in hardware |
@@ -49,7 +49,7 @@ Inside the CC1101 payload, little-endian:
 
 **Overhead:** 14 bytes (16 with an ack) + CC1101's own 4 preamble + 4 sync + 1 length + 2 CRC. A 30-byte payload frame is ~55 bytes on air ≈ **11.5 ms** at 38.4 kbps.
 
-**MIC length (Proposed: 4 bytes):** the same as LoRaWAN. A forger gets one guess per frame on air (≈ 2⁻³² chance each). At this link's airtime, brute force takes centuries, and replays are stopped by the counter. 8 bytes would cost 0.8 ms more per frame. Owner to confirm (open question O-2).
+**MIC length: 4 bytes** (O-2, accepted), the same as LoRaWAN. A forger gets one guess per frame on air (≈ 2⁻³² chance each). At this link's airtime, brute force takes centuries, and replays are stopped by the counter. 8 bytes would cost 0.8 ms more per frame.
 
 **Duplicates:** the weather station's 2–3 repeats carry the **same** `ctr` and identical bytes. The gateway accepts the first and drops the rest silently.
 
@@ -78,8 +78,8 @@ Nodes transmit on their own schedule with ±10 % random jitter on the period, so
 | Node | `RX_OPEN` | Reachable within |
 |---|---|---|
 | Garden controller | every poll (3 s) | ~3–5 s |
-| Soil monitor | every report (proposed) | one report interval |
-| Weather station | **one frame per hour** (proposed). Its 1 mAh/day budget can't pay for a window every minute (~30 µA average) | ~1 h (config/time only) |
+| Soil monitor | every report (O-3) | one report interval |
+| Weather station | **one frame per hour**: the hourly `HEALTH` frame (weather_station ADR-0003). Its 1 mAh/day budget can't pay for a window every minute (~30 µA average) | ~1 h (config/time only) |
 
 ### 6.3 Acknowledgements
 - Uplink with `ACK_REQ` → the gateway answers in the window (an ack can ride on a queued downlink). Used by the garden for state changes and faults. Sensor reports don't request acks; the weather station's repeats do the job.
@@ -89,6 +89,8 @@ Nodes transmit on their own schedule with ±10 % random jitter on the period, so
 Garden 1 × 11 ms / 3 s + weather 2 stations × 3 × 11 ms / 60 s + 10 soil nodes × 11 ms / 300 s ≈ **0.5 % channel occupancy**. Pure-ALOHA collision probability per frame ≈ 1 %. Retries and repeats absorb that. Fine up to dozens of nodes.
 
 ## 7. Message set (N-9, decided)
+
+The authoritative layouts are in `schema/rnet.toml` (ADR-0001); this table is an overview, and `docs/generated/messages.md` will replace it once the generator runs.
 
 | `msg_type` | Dir | Who | Payload (sketch) |
 |---|---|---|---|
@@ -107,6 +109,10 @@ Garden 1 × 11 ms / 3 s + weather 2 stations × 3 × 11 ms / 60 s + 10 soil node
 ```
 home-radio-net/
   docs/                 this spec + ADRs
+  schema/rnet.toml      the protocol definition (ADR-0001)
+  tools/rnetgen/        generator: C, gateway tables, Python codec, docs, test vectors
+  tools/rnet_py/        generated Python codec, sniffer, provisioning script (O-4)
+  test/vectors/         golden test vectors (JSON)
   lib/rnet/             portable C99, no malloc, no OS:
                         frame pack/parse, AES-128 + CMAC, key derivation,
                         counter/replay window, message structs
@@ -123,7 +129,7 @@ home-radio-net/
                         (garden_run, garden_stop, node_config)
 ```
 
-- **Accepted (ADR-0001, 2026-10-10):** message definitions, PHY constants and node types live in one schema (`schema/rnet.toml`). A stdlib-only generator (`tools/rnetgen/`) emits the C, gateway, Python, Markdown and test-vector code from it; adds `schema/`, `tools/`, `test/vectors/` to this layout.
+- **ADR-0001 (accepted 2026-10-10):** message definitions, PHY constants and node types live in one schema (`schema/rnet.toml`). A stdlib-only generator (`tools/rnetgen/`) emits the C, gateway, Python, Markdown and test-vector code from it.
 - **The same C library runs on the STM32 nodes and inside the ESP32 component**, so both ends share one implementation and one set of test vectors. Software AES costs ~1 ms per frame on a 32 MHz Cortex-M0+, which is fine.
 - The component **replies from its own packet listener**, not via a YAML `on_packet` automation, to keep the downlink inside the node's 120 ms window (`smart-garden-system/docs/03-radio-link.md`).
 - **Node registry** in the gateway YAML: `node_id`, `node_type`, name. Entities are created per type. Unknown nodes are logged, not exposed.
@@ -184,7 +190,7 @@ In Home Assistant:
 
 | Project | Change |
 |---|---|
-| weather_station | Packet format → this frame format (section 4) + CMAC + persisted counter. Adds an hourly `RX_OPEN` frame (time/config). The receiver work moves to `home-radio-net/esphome`. Its spec R-1 ("our own packet format") points here. **Not edited yet: awaiting the owner's OK** |
+| weather_station | Packet format → this frame format (section 4) + CMAC + persisted counter. Adds an hourly `RX_OPEN` frame (time/config). The receiver work moves to `home-radio-net/esphome`. Its spec R-1/R-3 point here; `WX_REPORT` is defined in `schema/rnet.toml` (**done**, weather_station spec v2.19, 2026-10-10) |
 | smart-garden-system | Spec 4.4 and `docs/03-radio-link.md` point here for the protocol; ADR-0002 is unaffected (same radio, same GDO0 use). Its node firmware (ADR-0004, accepted 2026-10-10) links `lib/rnet` and `lib/node_l0` and needs the garden message fields in the schema |
 | Soil monitors | Start from this spec |
 
@@ -220,4 +226,4 @@ No open standard fits **CC1101 + years-on-small-solar + an ESPHome gateway** off
 - **0.3 (2026-10-03):** Owner accepted all proposals: N-5–N-12 decided; O-1–O-5 accepted (918.5 MHz, 4-byte MIC, soil every 10 min, manifest-driven provisioning, single gateway).
 - **0.4 (2026-10-09):** ADR-0001 **Proposed**: one protocol schema (TOML) with generated code for nodes, gateway, host tools and docs; ESPHome gateway stub added to its work order.
 - **0.5 (2026-10-10):** `lib/node_l0/` added to the code layout (section 8): one STM32L0 platform and CC1101 driver for every node, from smart-garden-system ADR-0004 D2 (accepted). A change affecting every node project.
-- **0.6 (2026-10-10):** ADR-0001 **accepted** (owner). `schema/rnet.toml` drafted: frame, PHY, node types, `HEALTH`, `TIME`, `CONFIG_*`, and `WX_REPORT` (weather_station ADR-0003 step 0, accepted: 35-byte payload; weather housekeeping in an hourly `HEALTH` frame that sets `RX_OPEN`). Garden and soil messages are placeholders. Sync word 0xB54E proposed, pending schema review.
+- **0.6 (2026-10-10):** ADR-0001 **accepted** (owner). `schema/rnet.toml` drafted: frame, PHY, node types, `HEALTH`, `TIME`, `CONFIG_*`, and `WX_REPORT` (weather_station ADR-0003 step 0, accepted: 35-byte payload; weather housekeeping in an hourly `HEALTH` frame that sets `RX_OPEN`). Garden and soil messages are placeholders. Sync word 0xB54E proposed, pending schema review. Stale "proposed" wording for O-1–O-3 (accepted in 0.3) removed; section 7 points at the schema; section 8 lists `schema/`, `tools/`, `test/vectors/`.
