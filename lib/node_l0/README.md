@@ -12,6 +12,8 @@ Used by every node project (weather_station, smart-garden-system, soil monitors)
 | ST LL / CMSIS / startup (vendored, pinned) | `vendor/` (`VERSIONS.md`) | — |
 | **To come:** CC1101 driver with the generated PHY registers, rnet glue (counter persistence, `RX_OPEN` window) | | Waits for `tools/rnetgen` |
 
+The libraries are C99; every public header has `extern "C"` guards, so C++ node applications (weather_station) include them directly. The toolchain file also sets the C++ flags (`-fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit`).
+
 Rules every image follows (ADR-0002 T5): Debug builds call `nl0_lowpower_init(true)` (SWD alive in Stop), and `main` waits ~2 s before the first Stop so a probe can attach after a power cycle.
 
 Build from the repo root:

@@ -10,6 +10,10 @@
 
 #include "node_l0/ee_ring.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* ---- clocks ------------------------------------------------------------ */
 typedef enum {
     NL0_MSI_1M = 4, /* 1.048 MHz */
@@ -88,5 +92,9 @@ nl0_reset_cause_t nl0_reset_cause(void);
 
 /* Backend for nl0_ee_ring_t over the real data EEPROM. Addresses are absolute. */
 extern const nl0_ee_backend_t nl0_eeprom_backend;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

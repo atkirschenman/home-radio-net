@@ -36,6 +36,8 @@ Constraints: no breadboard stage (weather_station ADR-0003 D3), so the host test
 - Warnings: `-Wall -Wextra -Wshadow -Wconversion -Werror` on `core/`, `lib/rnet` and project code; vendored ST code is built with warnings off.
 - Every target build prints flash/RAM use against the L051's 64 KB / 8 KB and writes `.elf`, `.hex`, `.bin` and a `.map`.
 
+**Amended 2026-10-10 (weather_station ADR-0003 D1 amendment, owner):** node *application* code may be C++17 (weather_station is). The toolchain file sets `-fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit` for C++; no heap, no iostream. `lib/rnet` and `lib/node_l0` stay C99 (they also run in the ESP32 gateway and the garden/soil nodes), with `extern "C"` guards in every public header.
+
 ### T3: ST code: vendored from ST's per-component GitHub repos, pinned by tag
 
 Vendored as plain files into `lib/node_l0/vendor/` with a `VERSIONS.md` (repo, tag, licence), not as submodules, so a build never needs network access:

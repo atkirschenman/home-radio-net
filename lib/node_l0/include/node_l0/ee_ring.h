@@ -13,6 +13,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define NL0_EE_RING_MAX_WORDS 6u /* payload words per record */
 
 typedef struct {
@@ -44,5 +48,9 @@ bool nl0_ee_ring_load(nl0_ee_ring_t *r, uint32_t *payload);
 bool nl0_ee_ring_store(nl0_ee_ring_t *r, const uint32_t *payload);
 
 uint32_t nl0_crc32(uint32_t crc, const uint32_t *words, uint32_t n);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
