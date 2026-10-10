@@ -59,16 +59,23 @@ The **linker script is our own** (64 KB flash, 8 KB RAM, data EEPROM at 0x0808_0
 ### T5: Debug probe: ST-LINK, via OpenOCD + GDB
 
 - **Software:** **OpenOCD 0.12** (Ubuntu package; `interface/stlink.cfg` + `target/stm32l0.cfg`) and **gdb-multiarch**, with VS Code **Cortex-Debug** as the optional front end (launch configs committed). `stlink-tools` (`st-flash`, `st-info`) installed as a fallback and for quick probe checks.
-- **Probe, recommended: ST-LINK/V3MINIE** (~US$15). It's ST's own probe for ST parts, it has a **virtual COM port**, so the same USB cable carries the USART1 log, and it adapts to the target's 3.3 V without powering it. It has an STDC14 connector, so it needs a cable to our headers (below).
-- **Alternatives:** a **NUCLEO-L053R8** (~US$15): its on-board ST-LINK/V2-1 (with VCP) can be cut free to program our boards, and the board itself is an STM32L053, close enough to the L051 to run `lib/node_l0` (LPTIM in Stop, RTC, EEPROM ring) **before the first JLC boards arrive**. That partly reopens the dropped breadboard stage (weather_station ADR-0003 D3), but cheaply. A generic ST-LINK/V2 clone (~US$5) also works with OpenOCD on the L0; no VCP, and clones vary in quality.
+- **Probe: the owner's HiLetgo ST-LINK/V2 (clone), already on hand** (owner, 2026-10-10). OpenOCD (`interface/stlink.cfg`) and `st-flash` support it on the L0. No purchase.
+- **What a clone means in practice:**
+  - **No virtual COM port:** the USART1 log needs a separate 3.3 V USB-UART (T6).
+  - **Don't connect its 3.3V pin** while the board runs from its battery: it's a supply output, not a sense input, and would fight the TPS63900 output. Wire **SWDIO, SWCLK, GND and RST** only.
+  - **Its RST pin is not reliable on every clone** (on some it is only wired for STM8 SWIM). If "connect under reset" fails, OpenOCD falls back to `reset_config none`, and the firmware covers it (next bullet).
+  - **Low-power firmware vs SWD:** a running L0 that is in Stop mode drops the debug connection. So **Debug builds set `DBGMCU_CR.DBG_STOP`** (debug stays alive in Stop; costs current, irrelevant on the bench), and **every build waits ~2 s after reset before its first Stop entry**, so the probe can always attach by power-cycling the board.
+  - ST's firmware updater may refuse a clone, or may brick it; **don't update it** unless OpenOCD says the firmware is too old.
 - **Connection to the boards:**
-  - **J5 (2.54 mm 1×5):** five female-female jumper wires; works with any probe. Default for bring-up.
-  - **J3 (Tag-Connect TC2030-NL):** a **TC2030-CTX-NL** cable (10-pin 1.27 mm Cortex plug, ~US$40) plus a retaining clip or hand pressure. For flashing finished boards in the housing. *To check before buying:* that the 10-pin Cortex plug seats in the V3MINIE's STDC14 socket (ST documents the 10-pin as a subset of STDC14); otherwise add ST's or Tag-Connect's adapter.
+  - **J5 (2.54 mm 1×5):** four female-female jumper wires from the clone's 2×5 header (pins as printed on its case: SWDIO, SWCLK, GND, RST; 3.3V left off). Default for bring-up and for the provisioning script.
+  - **J3 (Tag-Connect TC2030-NL):** not used with the clone (its 2×5 2.54 mm header has a non-standard pinout, so no Tag-Connect cable fits). Revisit only if flashing boards in their housings gets awkward.
+- **Upgrade path if the clone misbehaves:** an ST-LINK/V3MINIE (~US$15, with a virtual COM port) or a NUCLEO-L053R8 (~US$15; its on-board ST-LINK/V2-1 can program external boards, and its STM32L053 can run `lib/node_l0` before the JLC boards arrive).
 - **Provisioning (O-4):** the script writes `node_id` + key into data EEPROM through OpenOCD (its Tcl `mww` after unlocking the EEPROM with the PEKEY sequence, or `stm32lx` driver support if present in 0.12). Which method works is proven on the first board; `st-flash` is the fallback.
 
 ### T6: Serial log and bench-mode capture
 
-- USART1 at 115200 8N1, through the V3MINIE's VCP (or any 3.3 V USB-UART such as a CP2102 module if another probe is chosen).
+- USART1 at 115200 8N1 through a **3.3 V USB-UART adapter** (CP2102, CH340 or FT232 module, ~US$5; **3.3 V logic**, TX/RX/GND only, its power pin left off). **Still open:** whether the owner has one.
+- **Fallback with no adapter: SEGGER RTT** through the ST-LINK. OpenOCD 0.12 serves RTT channels over a TCP port with any probe; it needs the debugger attached and `DBG_STOP` set, so it suits bring-up, not long bench-mode runs.
 - Terminal: **`tio`** (auto-reconnect when the board resets, timestamps); minicom is already installed as a fallback.
 - Bench-mode streams (weather_station ADR-0003 D9) are captured with a small Python script using **pyserial** in the project venv.
 
@@ -90,7 +97,7 @@ The **linker script is our own** (64 KB flash, 8 KB RAM, data EEPROM at 0x0808_0
 | Adjustable supply 1.8–3.3 V (battery sweep, brown-out, charger FSM) | Any bench supply, or the NiMH pack itself | A separate current-limited ~5–6 V supply for the solar input |
 | Wind pulses 0.5–100 Hz | A NUCLEO's timer or a Raspberry Pi Pico producing open-drain pulses, or a function generator | Real cups afterwards |
 | RF on air at 918.5 MHz | RTL-SDR (spec R-7) + **SDR++** or **URH** to see bursts and timing; later our own Python sniffer (`tools/rnet_py`) | `rtl_433` can be taught the frame later; not needed for bring-up |
-| UART | V3MINIE VCP | See T6 |
+| UART | 3.3 V USB-UART adapter (RTT through the ST-LINK as fallback) | See T6 |
 
 #### Fallback: current measurement with the INA219 (only if a power problem shows up)
 
@@ -126,5 +133,5 @@ OpenOCD's Ubuntu package installs udev rules for ST-LINK probes; replug the prob
 
 - `lib/node_l0` gets `cmake/arm-none-eabi.cmake` (with the GCC ≥ 13 check), the vendored ST files with `VERSIONS.md`, the linker script and OpenOCD configs; `.clang-format` and Unity land in this repo first and are reused by the node repos.
 - GitHub Actions workflows are added to home-radio-net (generator check, `lib/rnet` tests) and to each node repo (host tests + target builds).
-- Purchases for the owner (none bought yet): a probe (V3MINIE, or a NUCLEO-L053R8 if early silicon testing is wanted), jumper wires, later the TC2030-CTX-NL cable, No current meter or INA219 rework parts for now (owner, 2026-10-10: current measurement deferred; INA219 fallback documented).
+- Purchases for the owner: **none required.** The HiLetgo ST-LINK/V2 is the probe; a 3.3 V USB-UART adapter (~US$5) only if the owner doesn't have one; jumper wires. No current meter (deferred, see T9).
 - weather_station spec section 9 (Tooling) points here.
