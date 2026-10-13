@@ -18,3 +18,7 @@ lib/rnet/                   (to come) portable C library: frames, AES-CMAC, coun
 third_party/unity/          Unity test framework (vendored)
 esphome/components/         (to come) ESPHome gateway component
 ```
+
+## Licence
+
+MIT (`LICENSE`), except the vendored third-party code under `lib/node_l0/vendor/` and `third_party/`, which keeps its own licence (listed in `LICENSE` and `lib/node_l0/vendor/VERSIONS.md`).
