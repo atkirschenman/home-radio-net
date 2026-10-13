@@ -3,3 +3,4 @@ build/
 .esphome/
 secrets.yaml
 .vscode/
+build/
