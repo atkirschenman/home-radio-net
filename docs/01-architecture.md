@@ -40,7 +40,7 @@ Inside the CC1101 payload, little-endian:
 | 0 | 1 | `ctrl` | bits 7–6 version (0); bit 5 `DIR` (0 = uplink, 1 = downlink); bit 4 `ACK_REQ`; bit 3 `RX_OPEN` (uplink: "I'm listening after this frame"); bit 2 `ACK` (this frame acknowledges the peer's frame `ack_ctr`); bit 1 `MORE` (downlink: more queued for you, poll again); bit 0 reserved |
 | 1 | 1 | `net_id` | Network ID: separates this home from a neighbour running the same firmware |
 | 2 | 2 | `node_id` | Uplink: source. Downlink: destination. 0xFFFF reserved |
-| 4 | 1 | `node_type` | 0x01 weather-AcuRite, 0x02 weather-WS69, 0x10 garden controller, 0x20 soil monitor, … |
+| 4 | 1 | `node_type` | 0x01 weather-AcuRite, 0x02 weather-WS69, 0x03 weather-Misol (proposed), 0x10 garden controller, 0x20 soil monitor, … |
 | 5 | 4 | `ctr` | Frame counter, **per node per direction**, never reused (section 5.2) |
 | 9 | 1 | `msg_type` | Section 7 |
 | 10 | 0–2 | `ack_ctr` | Present only if `ACK` set: low 16 bits of the counter being acknowledged |
@@ -221,3 +221,4 @@ No open standard fits **CC1101 + years-on-small-solar + an ESPHome gateway** off
 - **0.4 (2026-10-09):** ADR-0001 **Proposed**: one protocol schema (TOML) with generated code for nodes, gateway, host tools and docs; ESPHome gateway stub added to its work order.
 - **0.5 (2026-10-10):** `lib/node_l0/` added to the code layout (section 8): one STM32L0 platform and CC1101 driver for every node, from smart-garden-system ADR-0004 D2 (accepted). A change affecting every node project.
 - **0.6 (2026-10-10):** ADR-0001 **accepted** (owner). `schema/rnet.toml` drafted: frame, PHY, node types, `HEALTH`, `TIME`, `CONFIG_*`, and `WX_REPORT` (weather_station ADR-0003 step 0, accepted: 35-byte payload; weather housekeeping in an hourly `HEALTH` frame that sets `RX_OPEN`). Garden and soil messages are placeholders. Sync word 0xB54E proposed, pending schema review.
+- **0.11 (2026-10-12):** **Proposed:** node type `weather_misol` = 0x03 (weather_station ADR-0004: Misol/Fine Offset sensors on the AcuRite board). The gateway's per-type rain constant changes from µm to **nm per tip** (`rain_nm_per_tip`), so Misol's 0.2794 mm is exact instead of rounding to 279 µm. Nothing is generated or deployed yet, so no version bump.
