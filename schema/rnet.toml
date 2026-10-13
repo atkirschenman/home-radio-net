@@ -76,7 +76,7 @@ consts = { rain_nm_per_tip = 254000 }   # 0.01 in
 id = 0x02
 consts = { rain_nm_per_tip = 300000 }   # 0.3 mm (check at WS69 teardown)
 
-# PROPOSED (weather_station ADR-0004): AcuRite board fitted with Misol / Fine
+# weather_station ADR-0004 (accepted 2026-10-12): AcuRite board fitted with Misol / Fine
 # Offset spare sensors (WH-SP-WS/WD/RG, = SparkFun SEN-15901).
 [node_types.weather_misol]
 id = 0x03
