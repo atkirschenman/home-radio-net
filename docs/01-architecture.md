@@ -1,6 +1,6 @@
 # 01 — Home radio network: architecture
 
-*Version 0.10, 2026-10-10. The shared 915 MHz radio architecture for every battery/solar node Andrew builds, and the one indoor gateway that bridges them to Home Assistant. Anything marked **Proposed** is not decided until the owner accepts it. Change log at the end.*
+*Version 0.11, 2026-10-12. The shared 915 MHz radio architecture for every battery/solar node Andrew builds, and the one indoor gateway that bridges them to Home Assistant. Anything marked **Proposed** is not decided until the owner accepts it. Change log at the end.*
 
 ## 1. Who uses it
 
@@ -40,7 +40,7 @@ Inside the CC1101 payload, little-endian:
 | 0 | 1 | `ctrl` | bits 7–6 version (0); bit 5 `DIR` (0 = uplink, 1 = downlink); bit 4 `ACK_REQ`; bit 3 `RX_OPEN` (uplink: "I'm listening after this frame"); bit 2 `ACK` (this frame acknowledges the peer's frame `ack_ctr`); bit 1 `MORE` (downlink: more queued for you, poll again); bit 0 reserved |
 | 1 | 1 | `net_id` | Network ID: separates this home from a neighbour running the same firmware |
 | 2 | 2 | `node_id` | Uplink: source. Downlink: destination. 0xFFFF reserved |
-| 4 | 1 | `node_type` | 0x01 weather-AcuRite, 0x02 weather-WS69, 0x10 garden controller, 0x20 soil monitor, … |
+| 4 | 1 | `node_type` | 0x01 weather-AcuRite, 0x02 weather-WS69, 0x03 weather-Misol, 0x10 garden controller, 0x20 soil monitor, … |
 | 5 | 4 | `ctr` | Frame counter, **per node per direction**, never reused (section 5.2) |
 | 9 | 1 | `msg_type` | Section 7 |
 | 10 | 0–2 | `ack_ctr` | Present only if `ACK` set: low 16 bits of the counter being acknowledged |
@@ -231,3 +231,4 @@ No open standard fits **CC1101 + years-on-small-solar + an ESPHome gateway** off
 - **0.8 (2026-10-10):** ADR-0002: probe = the owner's HiLetgo ST-LINK/V2 clone (SWDIO/SWCLK/GND/RST on the 2.54 mm header, no 3V3); USART1 log through a 3.3 V USB-UART, RTT as fallback; firmware rule: `DBG_STOP` in Debug builds and a ~2 s delay before the first Stop entry so SWD can always attach.
 - **0.9 (2026-10-10):** ADR-0002 **accepted**. `lib/node_l0` started: toolchain file, L051 linker script, vendored ST LL/CMSIS (pinned), EEPROM wear-levelled ring with host tests, clocks/RTC/Stop/IWDG/reset-cause/EEPROM/UART log (compile-checked), smoke image (2.3 KB). Root CMake presets and GitHub Actions CI added. CC1101 driver waits for the generator.
 - **0.10 (2026-10-10):** `lib/node_l0` headers get `extern "C"` guards and the toolchain file C++ flags, so node applications may be C++17 (weather_station ADR-0003 D1 amendment). The shared libraries stay C99.
+- **0.11 (2026-10-12):** **Accepted (owner, 2026-10-12):** node type `weather_misol` = 0x03 (weather_station ADR-0004: Misol/Fine Offset sensors on the AcuRite board). The gateway's per-type rain constant changes from µm to **nm per tip** (`rain_nm_per_tip`), so Misol's 0.2794 mm is exact instead of rounding to 279 µm. Nothing is generated or deployed yet, so no version bump.

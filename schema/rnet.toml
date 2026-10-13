@@ -12,7 +12,7 @@
 # All multi-byte values are little-endian. Physical value = raw * scale.
 # `invalid` is the raw sentinel meaning "not available".
 
-schema_version = 1
+schema_version = 1   # still 1: nothing generated or deployed yet
 
 # ---------------------------------------------------------------------------
 # Frame (01-architecture.md section 4)
@@ -70,11 +70,17 @@ uplink_jitter_pct = 10      # 6.1
 # ---------------------------------------------------------------------------
 [node_types.weather_acurite]
 id = 0x01
-consts = { rain_um_per_tip = 254 }   # 0.01 in
+consts = { rain_nm_per_tip = 254000 }   # 0.01 in
 
 [node_types.weather_ws69]
 id = 0x02
-consts = { rain_um_per_tip = 300 }   # 0.3 mm (check at WS69 teardown)
+consts = { rain_nm_per_tip = 300000 }   # 0.3 mm (check at WS69 teardown)
+
+# weather_station ADR-0004 (accepted 2026-10-12): AcuRite board fitted with Misol / Fine
+# Offset spare sensors (WH-SP-WS/WD/RG, = SparkFun SEN-15901).
+[node_types.weather_misol]
+id = 0x03
+consts = { rain_nm_per_tip = 279400 }   # 0.2794 mm (0.011 in), datasheet
 
 [node_types.garden]
 id = 0x10
@@ -109,7 +115,7 @@ net_id            = { id = 0x04, type = "u8" }
 [messages.HEALTH]
 id = 0x01
 dir = "up"
-node_types = ["weather_acurite", "weather_ws69", "garden", "soil"]
+node_types = ["weather_acurite", "weather_ws69", "weather_misol", "garden", "soil"]
 fields = [
   { name = "vbat",        type = "u16", scale = 1,   unit = "mV", ha = { device_class = "voltage", state_class = "measurement", entity_category = "diagnostic" } },
   { name = "vpanel",      type = "u16", scale = 1,   unit = "mV", invalid = 0xFFFF, ha = { device_class = "voltage", state_class = "measurement", entity_category = "diagnostic" } },
@@ -124,7 +130,7 @@ fields = [
 [messages.TIME]
 id = 0x02
 dir = "down"
-node_types = ["weather_acurite", "weather_ws69", "garden", "soil"]
+node_types = ["weather_acurite", "weather_ws69", "weather_misol", "garden", "soil"]
 fields = [
   { name = "unix_time", type = "u32", unit = "s" },
 ]
@@ -132,19 +138,19 @@ fields = [
 [messages.CONFIG_SET]
 id = 0x03
 dir = "down"
-node_types = ["weather_acurite", "weather_ws69", "garden", "soil"]
+node_types = ["weather_acurite", "weather_ws69", "weather_misol", "garden", "soil"]
 fields = [ { name = "items", type = "tlv", keys = "config_keys" } ]
 
 [messages.CONFIG_GET]
 id = 0x04
 dir = "down"
-node_types = ["weather_acurite", "weather_ws69", "garden", "soil"]
+node_types = ["weather_acurite", "weather_ws69", "weather_misol", "garden", "soil"]
 fields = [ { name = "keys", type = "tlv", keys = "config_keys", note = "TLVs with length 0: keys to report" } ]
 
 [messages.CONFIG_VAL]
 id = 0x05
 dir = "up"
-node_types = ["weather_acurite", "weather_ws69", "garden", "soil"]
+node_types = ["weather_acurite", "weather_ws69", "weather_misol", "garden", "soil"]
 fields = [ { name = "items", type = "tlv", keys = "config_keys" } ]
 
 # weather_station ADR-0003 step 0 (accepted 2026-10-10). Sent every report
@@ -153,7 +159,7 @@ fields = [ { name = "items", type = "tlv", keys = "config_keys" } ]
 [messages.WX_REPORT]
 id = 0x10
 dir = "up"
-node_types = ["weather_acurite", "weather_ws69"]
+node_types = ["weather_acurite", "weather_ws69", "weather_misol"]
 fields = [
   { name = "interval_s",    type = "u16", scale = 1,    unit = "s", ha = { entity_category = "diagnostic" } },
   { name = "wind_mean",     type = "u16", scale = 0.01, unit = "m/s", ha = { device_class = "wind_speed", state_class = "measurement", accuracy_decimals = 1 } },
@@ -161,7 +167,7 @@ fields = [
   { name = "wind_lull",     type = "u16", scale = 0.01, unit = "m/s", ha = { device_class = "wind_speed", state_class = "measurement", accuracy_decimals = 1 } },
   { name = "wind_dir",      type = "u16", scale = 0.1,  unit = "°", invalid = 0xFFFF, note = "vector average; invalid when calm", ha = { device_class = "wind_direction", state_class = "measurement_angle", accuracy_decimals = 0 } },
   { name = "wind_dir_gust", type = "u16", scale = 0.1,  unit = "°", invalid = 0xFFFF, ha = { device_class = "wind_direction", state_class = "measurement_angle", accuracy_decimals = 0 } },
-  { name = "rain_tips",     type = "u32", convert = "rain_um_per_tip", unit = "mm", note = "cumulative, survives resets", ha = { device_class = "precipitation", state_class = "total_increasing", accuracy_decimals = 2 } },
+  { name = "rain_tips",     type = "u32", convert = "rain_nm_per_tip", unit = "mm", note = "cumulative, survives resets", ha = { device_class = "precipitation", state_class = "total_increasing", accuracy_decimals = 2 } },
   { name = "temp",          type = "i16", scale = 0.01, unit = "°C", invalid = 0x7FFF, ha = { device_class = "temperature", state_class = "measurement", accuracy_decimals = 1 } },
   { name = "rh",            type = "u16", scale = 0.01, unit = "%", invalid = 0xFFFF, ha = { device_class = "humidity", state_class = "measurement", accuracy_decimals = 0 } },
   { name = "pressure",      type = "u32", scale = 0.01, unit = "hPa", invalid = 0xFFFFFFFF, note = "station level, raw unit Pa", ha = { device_class = "atmospheric_pressure", state_class = "measurement", accuracy_decimals = 1 } },
