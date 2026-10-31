@@ -54,6 +54,13 @@ radiolib_hal_l0::radiolib_hal_l0(const radio_lines &lines)
 {
 }
 
+void radiolib_hal_l0::init()
+{
+    spiBegin();
+    set_mode(lines_.gdo0, LL_GPIO_MODE_INPUT);
+    set_mode(lines_.gdo2, LL_GPIO_MODE_INPUT);
+}
+
 const gpio_line &radiolib_hal_l0::line_for(uint32_t pin) const
 {
     switch (pin) {
