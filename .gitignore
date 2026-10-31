@@ -4,3 +4,4 @@ build/
 secrets.yaml
 .vscode/
 build/
+.pio/

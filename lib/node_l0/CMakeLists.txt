@@ -6,8 +6,9 @@
 set(NODE_L0_DIR ${CMAKE_CURRENT_LIST_DIR} CACHE INTERNAL "")
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/node_l0.cmake)
 
-add_library(node_l0_portable STATIC src/ee_ring.c)
-target_include_directories(node_l0_portable PUBLIC include)
+add_library(node_l0_portable STATIC src/ee_ring.c src/cc1101.c)
+# rnet_phy.h (generated CC1101 table) comes from lib/rnet/gen
+target_include_directories(node_l0_portable PUBLIC include ${CMAKE_CURRENT_LIST_DIR}/../rnet/gen)
 
 if(CMAKE_CROSSCOMPILING)
   node_l0_check_compiler()
@@ -34,4 +35,8 @@ elseif(BUILD_TESTING)
   target_include_directories(test_ee_ring PRIVATE ${HRN_UNITY_DIR})
   target_link_libraries(test_ee_ring PRIVATE node_l0_portable)
   add_test(NAME node_l0.ee_ring COMMAND test_ee_ring)
+  add_executable(test_cc1101 test/test_cc1101.c ${HRN_UNITY_DIR}/unity.c)
+  target_include_directories(test_cc1101 PRIVATE ${HRN_UNITY_DIR})
+  target_link_libraries(test_cc1101 PRIVATE node_l0_portable)
+  add_test(NAME node_l0.cc1101 COMMAND test_cc1101)
 endif()
