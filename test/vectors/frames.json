@@ -1,5 +1,5 @@
 {
-  "schema_hash": "0x259E",
+  "schema_hash": "0x0670",
   "master_key": "000102030405060708090a0b0c0d0e0f",
   "keys": [
     {
@@ -20,86 +20,86 @@
   ],
   "payloads": [
     {
-      "msg": "HEALTH",
+      "message": "HEALTH",
       "values": {
-        "vbat": 23130,
-        "vpanel": 38807,
-        "board_temp": 21716,
-        "dl_rssi": -111,
+        "battery_voltage": 23130,
+        "panel_voltage": 38807,
+        "board_temperature": 21716,
+        "downlink_rssi": -111,
         "uptime": 1330597710,
-        "fw_version": 35979,
+        "firmware_version": 35979,
         "schema_hash": 51656,
         "reset_cause": 5
       },
       "payload": "5a5a9797d454914e4f4f4f8b8cc8c905"
     },
     {
-      "msg": "TIME",
+      "message": "TIME",
       "values": {
         "unix_time": 1515870810
       },
       "payload": "5a5a5a5a"
     },
     {
-      "msg": "WX_REPORT",
+      "message": "WEATHER_REPORT",
       "values": {
-        "interval_s": 23130,
+        "interval_seconds": 23130,
         "wind_mean": 38807,
         "wind_gust": 54484,
         "wind_lull": 4625,
-        "wind_dir": 20302,
-        "wind_dir_gust": 35979,
+        "wind_direction": 20302,
+        "wind_direction_at_gust": 35979,
         "rain_tips": 3385444808,
-        "temp": -30971,
-        "rh": 17474,
+        "temperature": -30971,
+        "relative_humidity": 17474,
         "pressure": 2172748159,
-        "vbat": 48828,
+        "battery_voltage": 48828,
         "flags": 249,
-        "prev_mean": 14646,
-        "prev_gust": 30323,
-        "prev_lull": 46000,
-        "prev_dir": 61677
+        "previous_wind_mean": 14646,
+        "previous_wind_gust": 30323,
+        "previous_wind_lull": 46000,
+        "previous_wind_direction": 61677
       },
       "payload": "5a5a9797d4d411124e4f8b8cc8c9c9c9058742447f818181bcbef936397376b0b3edf0"
     }
   ],
   "frames": [
     {
-      "desc": "WX_REPORT uplink",
+      "description": "WEATHER_REPORT uplink",
       "key": "86d79683c8ff622a32ee29a82b695dde",
-      "ctrl": 0,
+      "control": 0,
       "net_id": 90,
       "node_id": 1,
       "node_type": 1,
-      "ctr": 1,
-      "msg": "WX_REPORT",
-      "ack_ctr": null,
+      "counter": 1,
+      "message": "WEATHER_REPORT",
+      "ack_counter": null,
       "payload": "5a5a9797d4d411124e4f8b8cc8c9c9c9058742447f818181bcbef936397376b0b3edf0",
       "frame": "005a01000101000000105a5a9797d4d411124e4f8b8cc8c9c9c9058742447f818181bcbef936397376b0b3edf061ba84c4"
     },
     {
-      "desc": "HEALTH uplink, RX_OPEN",
+      "description": "HEALTH uplink, rx_open",
       "key": "86d79683c8ff622a32ee29a82b695dde",
-      "ctrl": 8,
+      "control": 8,
       "net_id": 90,
       "node_id": 1,
       "node_type": 1,
-      "ctr": 65791,
-      "msg": "HEALTH",
-      "ack_ctr": null,
+      "counter": 65791,
+      "message": "HEALTH",
+      "ack_counter": null,
       "payload": "5a5a9797d454914e4f4f4f8b8cc8c905",
       "frame": "085a010001ff000100015a5a9797d454914e4f4f4f8b8cc8c905f53c68df"
     },
     {
-      "desc": "TIME downlink, acks 0x0102",
+      "description": "TIME downlink, acks 0x0102",
       "key": "4ed736cf4d6036bd65515fcff9dd01c2",
-      "ctrl": 32,
+      "control": 32,
       "net_id": 90,
       "node_id": 4660,
       "node_type": 16,
-      "ctr": 4294967294,
-      "msg": "TIME",
-      "ack_ctr": 258,
+      "counter": 4294967294,
+      "message": "TIME",
+      "ack_counter": 258,
       "payload": "5a5a5a5a",
       "frame": "245a341210feffffff0202015a5a5a5a070ba1aa"
     }

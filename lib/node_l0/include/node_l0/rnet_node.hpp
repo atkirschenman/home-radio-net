@@ -50,7 +50,7 @@ class uplink_counter
 {
   public:
     void load(const nl0_ee_backend_t &eeprom, uint32_t eeprom_base);
-    bool take_next(uint32_t &ctr);
+    bool take_next(uint32_t &counter);
 
   private:
     nl0_ee_ring_t ring_{};

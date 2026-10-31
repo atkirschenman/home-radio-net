@@ -11,7 +11,7 @@ if(NOT TARGET radiolib_crypto)
   target_compile_options(radiolib_crypto PRIVATE -w) # third-party: built as shipped
 endif()
 
-add_library(rnet STATIC src/rnet.cpp gen/rnet_msgs.cpp)
+add_library(rnet STATIC src/rnet.cpp gen/rnet_messages.cpp)
 target_include_directories(rnet PUBLIC include gen)
 target_link_libraries(rnet PUBLIC radiolib_crypto)
 target_compile_features(rnet PUBLIC cxx_std_17)

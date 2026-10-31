@@ -102,28 +102,28 @@ void test_replay_verdicts()
     static_assert(!rnet::counter_must_be_stored_before_use(513));
 }
 
-void test_wx_report_round_trip_and_short_payload()
+void test_weather_report_round_trip_and_short_payload()
 {
     const auto &v = vectors::frames[0];
-    rnet::wx_report report;
-    TEST_ASSERT_EQUAL(rnet::wx_report::field_count,
+    rnet::weather_report report;
+    TEST_ASSERT_EQUAL(rnet::weather_report::field_count,
                       report.unpack(v.payload.data(), v.payload.size()));
-    uint8_t packed[rnet::wx_report::length];
-    TEST_ASSERT_EQUAL(rnet::wx_report::length, report.pack(packed));
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(v.payload.data(), packed, rnet::wx_report::length);
+    uint8_t packed[rnet::weather_report::length];
+    TEST_ASSERT_EQUAL(rnet::weather_report::length, report.pack(packed));
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(v.payload.data(), packed, rnet::weather_report::length);
 
-    const std::size_t without_prev_dir = rnet::wx_report::length - 2;
-    TEST_ASSERT_EQUAL(rnet::wx_report::field_count - 1,
-                      report.unpack(v.payload.data(), without_prev_dir));
-    TEST_ASSERT_EQUAL_HEX16(rnet::wx_report::prev_dir_invalid, report.prev_dir);
+    const std::size_t without_previous_wind_direction = rnet::weather_report::length - 2;
+    TEST_ASSERT_EQUAL(rnet::weather_report::field_count - 1,
+                      report.unpack(v.payload.data(), without_previous_wind_direction));
+    TEST_ASSERT_EQUAL_HEX16(rnet::weather_report::previous_wind_direction_invalid, report.previous_wind_direction);
 
-    rnet::wx_report fresh;
-    TEST_ASSERT_EQUAL_INT16(rnet::wx_report::temp_invalid, fresh.temp);
-    fresh.temp = -1234;
+    rnet::weather_report fresh;
+    TEST_ASSERT_EQUAL_INT16(rnet::weather_report::temperature_invalid, fresh.temperature);
+    fresh.temperature = -1234;
     fresh.pack(packed);
-    rnet::wx_report decoded;
+    rnet::weather_report decoded;
     decoded.unpack(packed, sizeof packed);
-    TEST_ASSERT_EQUAL_INT16(-1234, decoded.temp);
+    TEST_ASSERT_EQUAL_INT16(-1234, decoded.temperature);
 }
 
 } // namespace
@@ -137,6 +137,6 @@ int main()
     RUN_TEST(test_any_flipped_bit_or_wrong_key_fails_the_mic);
     RUN_TEST(test_frame_size_limits_and_unknown_version);
     RUN_TEST(test_replay_verdicts);
-    RUN_TEST(test_wx_report_round_trip_and_short_payload);
+    RUN_TEST(test_weather_report_round_trip_and_short_payload);
     return UNITY_END();
 }

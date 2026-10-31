@@ -1,6 +1,6 @@
 # 01 — Home radio network: architecture
 
-*Version 0.12, 2026-10-31. The shared 915 MHz radio architecture for every battery/solar node Andrew builds, and the one indoor gateway that bridges them to Home Assistant. Anything marked **Proposed** is not decided until the owner accepts it. Change log at the end.*
+*Version 0.13, 2026-10-31. The shared 915 MHz radio architecture for every battery/solar node Andrew builds, and the one indoor gateway that bridges them to Home Assistant. Anything marked **Proposed** is not decided until the owner accepts it. Change log at the end.*
 
 ## 1. Who uses it
 
@@ -37,21 +37,21 @@ Inside the CC1101 payload, little-endian:
 
 | Offset | Size | Field | Notes |
 |---|---|---|---|
-| 0 | 1 | `ctrl` | bits 7–6 version (0); bit 5 `DIR` (0 = uplink, 1 = downlink); bit 4 `ACK_REQ`; bit 3 `RX_OPEN` (uplink: "I'm listening after this frame"); bit 2 `ACK` (this frame acknowledges the peer's frame `ack_ctr`); bit 1 `MORE` (downlink: more queued for you, poll again); bit 0 reserved |
+| 0 | 1 | `control` | bits 7–6 version (0); bit 5 `downlink` (0 = uplink, 1 = downlink); bit 4 `ack_request`; bit 3 `rx_open` (uplink: "I'm listening after this frame"); bit 2 `ack` (this frame acknowledges the peer's frame `ack_counter`); bit 1 `more` (downlink: more queued for you, poll again); bit 0 reserved |
 | 1 | 1 | `net_id` | Network ID: separates this home from a neighbour running the same firmware |
 | 2 | 2 | `node_id` | Uplink: source. Downlink: destination. 0xFFFF reserved |
 | 4 | 1 | `node_type` | 0x01 weather-AcuRite, 0x02 weather-WS69, 0x03 weather-Misol, 0x10 garden controller, 0x20 soil monitor, … |
-| 5 | 4 | `ctr` | Frame counter, **per node per direction**, never reused (section 5.2) |
-| 9 | 1 | `msg_type` | Section 7 |
-| 10 | 0–2 | `ack_ctr` | Present only if `ACK` set: low 16 bits of the counter being acknowledged |
-| … | n | payload | Fixed little-endian struct per `msg_type` (+ version byte inside where needed); fixed-point, no floats |
-| end − 4 | 4 | `mic` | AES-128-CMAC over `ctrl … payload`, **truncated to 4 bytes** |
+| 5 | 4 | `counter` | Frame counter, **per node per direction**, never reused (section 5.2) |
+| 9 | 1 | `message_type` | Section 7 |
+| 10 | 0–2 | `ack_counter` | Present only if `ack` set: low 16 bits of the counter being acknowledged |
+| … | n | payload | Fixed little-endian struct per `message_type` (+ version byte inside where needed); fixed-point, no floats |
+| end − 4 | 4 | `mic` | AES-128-CMAC over `control … payload`, **truncated to 4 bytes** |
 
 **Overhead:** 14 bytes (16 with an ack) + CC1101's own 4 preamble + 4 sync + 1 length + 2 CRC. A 30-byte payload frame is ~55 bytes on air ≈ **11.5 ms** at 38.4 kbps.
 
 **MIC length: 4 bytes** (O-2, accepted), the same as LoRaWAN. A forger gets one guess per frame on air (≈ 2⁻³² chance each). At this link's airtime, brute force takes centuries, and replays are stopped by the counter. 8 bytes would cost 0.8 ms more per frame.
 
-**Duplicates:** the weather station's 2–3 repeats carry the **same** `ctr` and identical bytes. The gateway accepts the first and drops the rest silently.
+**Duplicates:** the weather station's 2–3 repeats carry the **same** `counter` and identical bytes. The gateway accepts the first and drops the rest silently.
 
 ## 5. Security (N-3, N-7, decided)
 
@@ -61,7 +61,7 @@ Inside the CC1101 payload, little-endian:
 - **No payload encryption** (authenticity only, per N-3). Readings and valve states aren't secret. Adding AES-CTR later would be a version bump.
 
 ### 5.2 Counters and replay
-- Each node keeps an **uplink counter**; the gateway keeps a **downlink counter per node**. A receiver accepts a frame only if `ctr` > last accepted (duplicates with the same counter are dropped, not errors).
+- Each node keeps an **uplink counter**; the gateway keeps a **downlink counter per node**. A receiver accepts a frame only if `counter` > last accepted (duplicates with the same counter are dropped, not errors).
 - **Persistence without flash wear:** the node writes its counter to EEPROM every 256 frames. On boot it resumes at stored + 256, so a reboot never reuses a value. The gateway does the same in ESP32 NVS per node.
 - At the garden's 1 frame / 3 s, a 32-bit counter lasts > 400 years.
 
@@ -83,25 +83,25 @@ Nodes transmit on their own schedule with ±10 % random jitter on the period, so
 
 ### 6.3 Acknowledgements
 - Uplink with `ACK_REQ` → the gateway answers in the window (an ack can ride on a queued downlink). Used by the garden for state changes and faults. Sensor reports don't request acks; the weather station's repeats do the job.
-- Downlink with `ACK_REQ` (every garden command) → the node sets `ACK` + `ack_ctr` in its next uplink. The gateway retries in later windows until acknowledged. After ~30 s of retries it marks the node **unreachable** in Home Assistant.
+- Downlink with `ack_request` (every garden command) → the node sets `ack` + `ack_counter` in its next uplink. The gateway retries in later windows until acknowledged. After ~30 s of retries it marks the node **unreachable** in Home Assistant.
 
 ### 6.4 Channel load (sanity check)
 Garden 1 × 11 ms / 3 s + weather 2 stations × 3 × 11 ms / 60 s + 10 soil nodes × 11 ms / 300 s ≈ **0.5 % channel occupancy**. Pure-ALOHA collision probability per frame ≈ 1 %. Retries and repeats absorb that. Fine up to dozens of nodes.
 
 ## 7. Message set (N-9, decided)
 
-The authoritative layouts are in `schema/rnet.toml` (ADR-0001); this table is an overview, and `docs/generated/messages.md` will replace it once the generator runs.
+The authoritative layouts are in `schema/rnet.toml` (ADR-0001); this table is an overview; `docs/generated/messages.md` has the generated field tables.
 
-| `msg_type` | Dir | Who | Payload (sketch) |
+| `message_type` | Direction | Who | Payload (sketch) |
 |---|---|---|---|
-| 0x01 `HEALTH` | up | all | VBAT (mV), V_panel (mV), board temp (0.1 °C), last downlink RSSI, uptime, fw version, reset cause. Can be appended to any report |
+| 0x01 `HEALTH` | up | all | battery voltage (mV), panel voltage (mV), board temperature (0.1 °C), last downlink RSSI, uptime, firmware version, schema hash, reset cause. Can be appended to any report |
 | 0x02 `TIME` | down | any | Unix time (s); nodes that care use it, others ignore it |
-| 0x03 `CONFIG_SET` / 0x04 `CONFIG_GET` / 0x05 `CONFIG_VAL` | down/down/up | all | TLV list (report interval, TX power cap, RX_OPEN cadence, calibration) |
-| 0x10 `WX_REPORT` | up | weather | weather_station's measurement set (wind, gust, direction, rain counter, T/H, pressure) |
+| 0x03 `CONFIG_SET` / 0x04 `CONFIG_GET` / 0x05 `CONFIG_VALUE` | down/down/up | all | TLV list (report interval, TX power cap, RX_OPEN cadence, calibration) |
+| 0x10 `WEATHER_REPORT` | up | weather | weather_station's measurement set (wind, gust, direction, rain counter, temperature, humidity, pressure) |
 | 0x20 `GARDEN_POLL` | up | garden | Compact status: per-zone state, remaining run time, main state, faults, battery |
 | 0x21 `GARDEN_RUN` | down | garden | zone, **duration (s, required, capped by the node)**. **No on/open message exists** (garden R-3) |
 | 0x22 `GARDEN_STOP` | down | garden | zone or all |
-| 0x23 `GARDEN_EVENT` | up | garden | State change / fault, `ACK_REQ` |
+| 0x23 `GARDEN_EVENT` | up | garden | State change / fault, `ack_request` |
 | 0x30 `SOIL_REPORT` | up | soil | Moisture raw + calibrated, soil temperature, … (defined with the soil project) |
 
 ## 8. Code layout (N-10, decided)
@@ -190,7 +190,7 @@ In Home Assistant:
 
 | Project | Change |
 |---|---|
-| weather_station | Packet format → this frame format (section 4) + CMAC + persisted counter. Adds an hourly `RX_OPEN` frame (time/config). The receiver work moves to `home-radio-net/esphome`. Its spec R-1/R-3 point here; `WX_REPORT` is defined in `schema/rnet.toml` (**done**, weather_station spec v2.19, 2026-10-10) |
+| weather_station | Packet format → this frame format (section 4) + CMAC + persisted counter. Adds an hourly `RX_OPEN` frame (time/config). The receiver work moves to `home-radio-net/esphome`. Its spec R-1/R-3 point here; `WEATHER_REPORT` (then `WX_REPORT`) is defined in `schema/rnet.toml` (**done**, weather_station spec v2.19, 2026-10-10) |
 | smart-garden-system | Spec 4.4 and `docs/03-radio-link.md` point here for the protocol; ADR-0002 is unaffected (same radio, same GDO0 use). Its node firmware (ADR-0004, accepted 2026-10-10) links `lib/rnet` and `lib/node_l0` and needs the garden message fields in the schema |
 | Soil monitors | Start from this spec |
 
@@ -217,7 +217,7 @@ No open standard fits **CC1101 + years-on-small-solar + an ESPHome gateway** off
 | O-2 | MIC length | **Accepted: 4 bytes**, as LoRaWAN. Replays are blocked by the counter; a forger gets one 2⁻³² guess per frame on air |
 | O-3 | Soil monitors | **Accepted: every 10 min, `RX_OPEN` on every report**, 5–10 nodes, small solar (owner). Sensor and distances defined in their own project. Channel load stays < 1 % |
 | O-4 | Key provisioning | **Accepted:** a **host script** (in this repo) reads a node manifest (`node_id`, type, name), derives the node key from the master key, and writes `node_id` + key into the STM32's **data EEPROM** over SWD (`st-flash` / OpenOCD) after flashing firmware. The firmware image stays identical for every node of a type. The same manifest generates the gateway's `nodes:` / `devices:` YAML, so the two can't drift |
-| O-5 | Second gateway | **Accepted: not now.** The frame format already allows it: dedup is by `(node_id, ctr)`, so two gateways receiving the same frame is harmless. Only downlinks would need coordination (one gateway answers). Revisit if coverage ever needs it |
+| O-5 | Second gateway | **Accepted: not now.** The frame format already allows it: dedup is by `(node_id, counter)`, so two gateways receiving the same frame is harmless. Only downlinks would need coordination (one gateway answers). Revisit if coverage ever needs it |
 
 ## Change log
 
@@ -231,5 +231,6 @@ No open standard fits **CC1101 + years-on-small-solar + an ESPHome gateway** off
 - **0.8 (2026-10-10):** ADR-0002: probe = the owner's HiLetgo ST-LINK/V2 clone (SWDIO/SWCLK/GND/RST on the 2.54 mm header, no 3V3); USART1 log through a 3.3 V USB-UART, RTT as fallback; firmware rule: `DBG_STOP` in Debug builds and a ~2 s delay before the first Stop entry so SWD can always attach.
 - **0.9 (2026-10-10):** ADR-0002 **accepted**. `lib/node_l0` started: toolchain file, L051 linker script, vendored ST LL/CMSIS (pinned), EEPROM wear-levelled ring with host tests, clocks/RTC/Stop/IWDG/reset-cause/EEPROM/UART log (compile-checked), smoke image (2.3 KB). Root CMake presets and GitHub Actions CI added. CC1101 driver waits for the generator.
 - **0.10 (2026-10-10):** `lib/node_l0` headers get `extern "C"` guards and the toolchain file C++ flags, so node applications may be C++17 (weather_station ADR-0003 D1 amendment). The shared libraries stay C99.
+- **0.13 (2026-10-31):** Schema names in whole words (owner): `WX_REPORT` → `WEATHER_REPORT`, `CONFIG_VAL` → `CONFIG_VALUE`, header `ctrl`/`ctr`/`msg_type`/`ack_ctr` → `control`/`counter`/`message_type`/`ack_counter`, control bit `dir` → `downlink`, `ack_req` → `ack_request`; fields such as `vbat` → `battery_voltage`, `rh` → `relative_humidity`, `prev_*` → `previous_wind_*`; reset causes `independent_watchdog`, `low_power`, `reset_pin`; config keys `report_interval_seconds`, `rx_open_every_nth_uplink`, and `tx_power` → `tx_power_dbm` (i8, dBm, since RadioLib takes dBm rather than a PATABLE byte). Generated files `rnet_msgs.*` → `rnet_messages.*`. Bytes on air unchanged; schema hash now 0x0670. Standard radio acronyms (RX, TX, ACK, RSSI) stay.
 - **0.12 (2026-10-31):** Schema **accepted** (owner): sync word `0xB54E`, `HEALTH` fields as drafted. Implementation (owner decisions): C++17 for the shared libraries and generated code; **RadioLib** 7.8.1 (vendored, `lib/vendor/RadioLib`) drives the CC1101 and provides AES-128/CMAC; `tools/rnetgen` emits PHY parameters, message structs, Python codec, docs and golden vectors; `lib/node_l0` gains the EEPROM identity record + uplink counter (rnet region 0x000-0x0FF) and the RadioLib HAL for bare-metal STM32L0; `tools/link_test` is an ESP32 bench receiver. Gateway: ESPHome, with raw MQTT as the fallback if that proves easier.
 - **0.11 (2026-10-12):** **Accepted (owner, 2026-10-12):** node type `weather_misol` = 0x03 (weather_station ADR-0004: Misol/Fine Offset sensors on the AcuRite board). The gateway's per-type rain constant changes from µm to **nm per tip** (`rain_nm_per_tip`), so Misol's 0.2794 mm is exact instead of rounding to 279 µm. Nothing is generated or deployed yet, so no version bump.

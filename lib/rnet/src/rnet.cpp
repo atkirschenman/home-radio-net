@@ -48,9 +48,9 @@ std::size_t header_length(bool has_ack)
 uint8_t control_byte(const frame_header &header)
 {
     const auto version_mask = static_cast<uint8_t>(3u << control_bits::version_shift);
-    auto c = static_cast<uint8_t>(header.control & ~version_mask & ~control_bits::ack);
-    c = static_cast<uint8_t>(c | frame_version << control_bits::version_shift);
-    return header.has_ack ? static_cast<uint8_t>(c | control_bits::ack) : c;
+    auto control = static_cast<uint8_t>(header.control & ~version_mask & ~control_bits::ack);
+    control = static_cast<uint8_t>(control | frame_version << control_bits::version_shift);
+    return header.has_ack ? static_cast<uint8_t>(control | control_bits::ack) : control;
 }
 
 uint8_t frame_version_of(uint8_t control_value)
@@ -125,21 +125,21 @@ bool parse_frame_without_mic_check(const uint8_t *frame, std::size_t frame_lengt
         frame_version_of(frame[0]) != frame_version) {
         return false;
     }
-    frame_header &h = parsed.header;
-    h.control = frame[0];
-    h.net_id = frame[1];
-    h.node_id = get_u16(&frame[2]);
-    h.node_type = frame[4];
-    h.counter = get_u32(&frame[5]);
-    h.message_type = frame[9];
-    h.has_ack = (frame[0] & control_bits::ack) != 0;
-    h.ack_counter = 0;
-    const std::size_t payload_offset = header_length(h.has_ack);
+    frame_header &header = parsed.header;
+    header.control = frame[0];
+    header.net_id = frame[1];
+    header.node_id = get_u16(&frame[2]);
+    header.node_type = frame[4];
+    header.counter = get_u32(&frame[5]);
+    header.message_type = frame[9];
+    header.has_ack = (frame[0] & control_bits::ack) != 0;
+    header.ack_counter = 0;
+    const std::size_t payload_offset = header_length(header.has_ack);
     if (frame_length < payload_offset + mic_length) {
         return false;
     }
-    if (h.has_ack) {
-        h.ack_counter = get_u16(&frame[10]);
+    if (header.has_ack) {
+        header.ack_counter = get_u16(&frame[10]);
     }
     parsed.payload = &frame[payload_offset];
     parsed.payload_length = frame_length - payload_offset - mic_length;

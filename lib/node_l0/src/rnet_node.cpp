@@ -93,12 +93,12 @@ void uplink_counter::load(const nl0_ee_backend_t &eeprom, uint32_t eeprom_base)
     next_ = any_stored ? rnet::counter_after_reset(last_stored) : 0;
 }
 
-bool uplink_counter::take_next(uint32_t &ctr)
+bool uplink_counter::take_next(uint32_t &counter)
 {
     if (rnet::counter_must_be_stored_before_use(next_) && !nl0_ee_ring_store(&ring_, &next_)) {
         return false;
     }
-    ctr = next_++;
+    counter = next_++;
     return true;
 }
 

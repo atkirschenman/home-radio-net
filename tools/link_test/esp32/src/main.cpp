@@ -131,34 +131,34 @@ void print_direction(const char *label, uint16_t tenths_of_degree)
     }
 }
 
-void print_weather_report(const rnet::wx_report &report, uint8_t node_type)
+void print_weather_report(const rnet::weather_report &report, uint8_t node_type)
 {
     Serial.printf("  weather interval=%us wind mean/gust/lull=%.2f/%.2f/%.2f m/s",
-                  report.interval_s, report.wind_mean / 100.0, report.wind_gust / 100.0,
+                  report.interval_seconds, report.wind_mean / 100.0, report.wind_gust / 100.0,
                   report.wind_lull / 100.0);
-    print_direction("direction", report.wind_dir);
-    print_direction("direction_at_gust", report.wind_dir_gust);
+    print_direction("direction", report.wind_direction);
+    print_direction("direction_at_gust", report.wind_direction_at_gust);
     const double rain_mm = report.rain_tips * (double)rain_nm_per_tip(node_type) / 1e6;
     Serial.printf("\n     rain=%lu tips (%.2f mm)", (unsigned long)report.rain_tips, rain_mm);
-    if (report.temp == rnet::wx_report::temp_invalid) {
+    if (report.temperature == rnet::weather_report::temperature_invalid) {
         Serial.print(" temperature=-");
     } else {
-        Serial.printf(" temperature=%.2f C", report.temp / 100.0);
+        Serial.printf(" temperature=%.2f C", report.temperature / 100.0);
     }
-    if (report.rh == rnet::wx_report::rh_invalid) {
+    if (report.relative_humidity == rnet::weather_report::relative_humidity_invalid) {
         Serial.print(" humidity=-");
     } else {
-        Serial.printf(" humidity=%.1f %%", report.rh / 100.0);
+        Serial.printf(" humidity=%.1f %%", report.relative_humidity / 100.0);
     }
-    if (report.pressure == rnet::wx_report::pressure_invalid) {
+    if (report.pressure == rnet::weather_report::pressure_invalid) {
         Serial.print(" pressure=-");
     } else {
         Serial.printf(" pressure=%.2f hPa", report.pressure / 100.0);
     }
-    Serial.printf(" battery=%u mV flags=0x%02X", report.vbat, report.flags);
-    if (report.flags & rnet::wx_report::flags_prev_valid) {
-        Serial.printf(" previous=%.2f/%.2f/%.2f", report.prev_mean / 100.0,
-                      report.prev_gust / 100.0, report.prev_lull / 100.0);
+    Serial.printf(" battery=%u mV flags=0x%02X", report.battery_voltage, report.flags);
+    if (report.flags & rnet::weather_report::flags_previous_interval_valid) {
+        Serial.printf(" previous=%.2f/%.2f/%.2f", report.previous_wind_mean / 100.0,
+                      report.previous_wind_gust / 100.0, report.previous_wind_lull / 100.0);
     }
     Serial.println();
 }
@@ -168,16 +168,16 @@ void print_health(const rnet::health &health)
     const bool schema_matches = health.schema_hash == rnet::phy::schema_hash;
     Serial.printf("  health battery=%u panel=%u mV board=%.1f C downlink_rssi=%d uptime=%lus "
                   "firmware=%u.%u schema=0x%04X%s reset_cause=%u\n",
-                  health.vbat, health.vpanel, health.board_temp / 10.0, health.dl_rssi,
-                  (unsigned long)health.uptime, health.fw_version >> 8, health.fw_version & 0xFF,
+                  health.battery_voltage, health.panel_voltage, health.board_temperature / 10.0, health.downlink_rssi,
+                  (unsigned long)health.uptime, health.firmware_version >> 8, health.firmware_version & 0xFF,
                   health.schema_hash, schema_matches ? "" : " (MISMATCH)", health.reset_cause);
 }
 
 void print_payload(const rnet::parsed_frame &frame)
 {
     const uint8_t node_type = frame.header.node_type;
-    if (frame.header.message_type == rnet::wx_report::id) {
-        rnet::wx_report report;
+    if (frame.header.message_type == rnet::weather_report::id) {
+        rnet::weather_report report;
         report.unpack(frame.payload, frame.payload_length);
         print_weather_report(report, node_type);
     } else if (frame.header.message_type == rnet::health::id) {
@@ -193,20 +193,20 @@ bool handle_rnet_frame(const uint8_t *bytes, size_t length, packet_quality quali
     if (!rnet::parse_frame_without_mic_check(bytes, length, frame)) {
         return false;
     }
-    const rnet::frame_header &h = frame.header;
+    const rnet::frame_header &header = frame.header;
     Serial.printf("rnet node=0x%04X type=0x%02X net=0x%02X counter=%lu message=0x%02X "
                   "control=0x%02X rssi=%.1f lqi=%u",
-                  h.node_id, h.node_type, h.net_id, (unsigned long)h.counter, h.message_type,
-                  h.control, quality.rssi_dbm, quality.lqi);
+                  header.node_id, header.node_type, header.net_id, (unsigned long)header.counter, header.message_type,
+                  header.control, quality.rssi_dbm, quality.lqi);
 
-    const rnet::aes_key key = rnet::derive_node_key(rnet::test_master_key, h.node_id, h.node_type);
+    const rnet::aes_key key = rnet::derive_node_key(rnet::test_master_key, header.node_id, header.node_type);
     if (!rnet::mic_is_valid(key, bytes, length)) {
         Serial.println(" MIC INVALID (not the test key, or corrupt)");
         return true;
     }
-    known_node *node = find_or_add_node(h.node_id, h.node_type);
+    known_node *node = find_or_add_node(header.node_id, header.node_type);
     const rnet::replay_verdict verdict =
-        node ? node->counter.judge(h.counter) : rnet::replay_verdict::fresh;
+        node ? node->counter.judge(header.counter) : rnet::replay_verdict::fresh;
     if (verdict == rnet::replay_verdict::duplicate) {
         Serial.println(" (repeat)");
         return true;
@@ -217,9 +217,9 @@ bool handle_rnet_frame(const uint8_t *bytes, size_t length, packet_quality quali
         return true;
     }
     if (node) {
-        node->counter.accept(h.counter);
+        node->counter.accept(header.counter);
     }
-    Serial.println(h.control & rnet::control_bits::rx_open ? " listening for a downlink" : "");
+    Serial.println(header.control & rnet::control_bits::rx_open ? " listening for a downlink" : "");
     print_payload(frame);
     return true;
 }

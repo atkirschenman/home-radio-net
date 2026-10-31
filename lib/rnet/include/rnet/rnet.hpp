@@ -8,7 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "rnet_msgs.hpp"
+#include "rnet_messages.hpp"
 
 namespace rnet
 {
