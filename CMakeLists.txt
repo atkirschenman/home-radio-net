@@ -15,8 +15,8 @@ if(NOT CMAKE_CROSSCOMPILING)
   add_link_options(-fsanitize=address,undefined)
 endif()
 
-add_subdirectory(lib/node_l0)
 add_subdirectory(lib/rnet)
+add_subdirectory(lib/node_l0)
 
 if(CMAKE_CROSSCOMPILING)
   add_executable(node_l0_smoke lib/node_l0/examples/smoke/main.c)
