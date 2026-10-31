@@ -39,6 +39,10 @@ class radiolib_hal_l0 : public RadioLibHal
 
     explicit radiolib_hal_l0(const radio_lines &lines);
 
+    void init() override
+    {
+        spiBegin();
+    }
     void pinMode(uint32_t pin, uint32_t mode) override;
     void digitalWrite(uint32_t pin, uint32_t value) override;
     uint32_t digitalRead(uint32_t pin) override;
