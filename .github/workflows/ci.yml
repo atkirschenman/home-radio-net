@@ -7,7 +7,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install toolchain
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi cppcheck
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi cppcheck python3-cryptography
       - name: Generated code is current (ADR-0001 D2)
         run: python3 tools/rnetgen/rnetgen.py --check
       - name: Host tests

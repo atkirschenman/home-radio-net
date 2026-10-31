@@ -16,6 +16,7 @@ if(NOT CMAKE_CROSSCOMPILING)
 endif()
 
 add_subdirectory(lib/node_l0)
+add_subdirectory(lib/rnet)
 
 if(CMAKE_CROSSCOMPILING)
   add_executable(node_l0_smoke lib/node_l0/examples/smoke/main.c)

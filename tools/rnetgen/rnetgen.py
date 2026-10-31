@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """rnetgen: everything generated from schema/rnet.toml (ADR-0001 D2).
 
-Stdlib only (Python 3.11+ for tomllib). Outputs are committed; `--check`
-regenerates in memory and fails if any committed file differs (CI).
+Python 3.11+ (tomllib). The code outputs need only the stdlib; the golden
+vectors use tools/rnet_py/rnet.py, which takes AES/CMAC from the
+`cryptography` package (owner, 2026-10-31: known libraries over our own).
+Outputs are committed; `--check` regenerates in memory and fails if any
+committed file differs (CI).
 
     python3 tools/rnetgen/rnetgen.py           # write all outputs
     python3 tools/rnetgen/rnetgen.py --check   # CI: fail on drift
@@ -196,10 +199,335 @@ def emit_phy_h(s: dict) -> str:
     return "\n".join(lines)
 
 
+
+
+# ---------------------------------------------------------------------------
+# Messages
+# ---------------------------------------------------------------------------
+TYPES = {  # schema type -> (bytes, C type, signed, struct fmt)
+    "u8": (1, "uint8_t", False, "B"),
+    "u16": (2, "uint16_t", False, "H"),
+    "u32": (4, "uint32_t", False, "I"),
+    "i8": (1, "int8_t", True, "b"),
+    "i16": (2, "int16_t", True, "h"),
+    "i32": (4, "int32_t", True, "i"),
+    "bits": (1, "uint8_t", False, "B"),
+}
+
+
+def _upper(name: str) -> str:
+    return name.upper()
+
+
+def concrete_messages(s: dict) -> list[tuple[str, dict]]:
+    """Messages with a fixed field layout (no placeholders, no TLV)."""
+    out = []
+    for name, m in s["messages"].items():
+        if m.get("placeholder") or any(f["type"] == "tlv" for f in m.get("fields", [])):
+            continue
+        out.append((name, m))
+    return out
+
+
+def payload_len(m: dict) -> int:
+    return sum(TYPES[f["type"]][0] for f in m["fields"])
+
+
+def check_schema(s: dict) -> None:
+    for name, m in concrete_messages(s):
+        n = payload_len(m)
+        if "payload_len" in m:
+            assert n == m["payload_len"], f"{name}: fields add up to {n}, payload_len says {m['payload_len']}"
+        assert n + 14 <= s["frame"]["max_payload"], f"{name}: {n} + 14 bytes of frame > one FIFO"
+    for name, m in s["messages"].items():  # garden R-3: no open-ended actuation
+        if name.startswith("GARDEN_") and m["dir"] == "down" and not m.get("placeholder"):
+            assert any(f["name"] == "duration_s" for f in m["fields"]), f"{name}: needs duration_s"
+
+
+def _c_literal(v: int, ctype: str, signed: bool, bits: int) -> str:
+    if signed:
+        if v >= 1 << (bits - 1):
+            v -= 1 << bits
+        return f"(({ctype})({v}))"
+    return f"(({ctype})0x{v:X}u)"
+
+
+def emit_msgs_h(s: dict) -> str:
+    L = [f"/* {BANNER} */", "#ifndef RNET_MSGS_H", "#define RNET_MSGS_H", "",
+         "#include <stddef.h>", "#include <stdint.h>", "", "#ifdef __cplusplus", 'extern "C" {', "#endif", ""]
+    fr = s["frame"]
+    L += ["/* ---- frame (01-architecture.md section 4) ---- */",
+          f"#define RNET_FRAME_VERSION {fr['version']}u",
+          f"#define RNET_MAX_PAYLOAD {fr['max_payload']}u",
+          f"#define RNET_MIC_LEN {fr['mic_len']}u",
+          "#define RNET_HEADER_LEN 10u /* without ack_ctr */",
+          f"#define RNET_COUNTER_PERSIST_EVERY {fr['counter_persist_every']}u",
+          f'#define RNET_KEY_LABEL "{fr["key_derivation"]["label"]}"']
+    for bit, spec in fr["ctrl_bits"].items():
+        if "width" in spec:
+            L.append(f"#define RNET_CTRL_{_upper(bit)}_SHIFT {spec['shift']}u")
+        else:
+            L.append(f"#define RNET_CTRL_{_upper(bit)} (1u << {spec['shift']})")
+    L += ["", "/* ---- node types ---- */"]
+    for name, nt in s["node_types"].items():
+        L.append(f"#define RNET_NODE_{_upper(name)} 0x{nt['id']:02X}u")
+        for k, v in nt.get("consts", {}).items():
+            L.append(f"#define RNET_NODE_{_upper(name)}_{_upper(k)} {v}u")
+    L += ["", "/* ---- enums ---- */"]
+    for ename, vals in s["enums"].items():
+        for k, v in vals.items():
+            L.append(f"#define RNET_{_upper(ename)}_{_upper(k)} {v}u")
+    L += ["", "/* ---- CONFIG TLV keys ---- */"]
+    for k, spec in s["config_keys"].items():
+        L.append(f"#define RNET_CFG_{_upper(k)} 0x{spec['id']:02X}u /* {spec['type']} */")
+    L += ["", "/* ---- message types ---- */"]
+    for name, m in s["messages"].items():
+        L.append(f"#define RNET_MSG_{name} 0x{m['id']:02X}u")
+    for name, m in concrete_messages(s):
+        low = name.lower()
+        n = payload_len(m)
+        L += ["", f"/* ---- {name} (0x{m['id']:02X}, {m['dir']}link, {n} bytes) ---- */",
+              f"#define RNET_{name}_LEN {n}u", f"#define RNET_{name}_NFIELDS {len(m['fields'])}u"]
+        for f in m["fields"]:
+            size, ctype, signed, _ = TYPES[f["type"]]
+            if "invalid" in f:
+                L.append(f"#define RNET_{name}_{_upper(f['name'])}_INVALID "
+                         f"{_c_literal(f['invalid'], ctype, signed, 8 * size)}")
+            for bit, pos in f.get("bits", {}).items():
+                L.append(f"#define RNET_{name}_{_upper(f['name'])}_{_upper(bit)} (1u << {pos})")
+        L.append("typedef struct {")
+        for f in m["fields"]:
+            ctype = TYPES[f["type"]][1]
+            note = []
+            if "scale" in f and f["scale"] != 1:
+                note.append(f"x{f['scale']}")
+            if "unit" in f:
+                note.append(f["unit"])
+            if "convert" in f:
+                note.append(f"x node const {f['convert']}")
+            if "note" in f:
+                note.append(f["note"])
+            L.append(f"    {ctype} {f['name']};" + (f" /* {', '.join(note)} */" if note else ""))
+        L += [f"}} rnet_{low}_t;", "",
+              f"/* Writes RNET_{name}_LEN bytes; returns that length. */",
+              f"size_t rnet_{low}_pack(const rnet_{low}_t *m, uint8_t *buf);",
+              "/* Reads up to len bytes. A longer payload's tail is ignored; fields past a",
+              " * shorter one are set to their invalid value (or 0). Returns the number of",
+              " * fields present (ADR-0001 D3). */",
+              f"size_t rnet_{low}_unpack(rnet_{low}_t *m, const uint8_t *buf, size_t len);"]
+    L += ["", "#ifdef __cplusplus", "}", "#endif", "", "#endif", ""]
+    return "\n".join(L)
+
+
+def emit_msgs_c(s: dict) -> str:
+    L = [f"/* {BANNER} */", '#include "rnet_msgs.h"', ""]
+    for name, m in concrete_messages(s):
+        low = name.lower()
+        L.append(f"_Static_assert(RNET_{name}_LEN == {payload_len(m)}u, \"{name} size\");")
+    L.append("")
+    for name, m in concrete_messages(s):
+        low = name.lower()
+        L += [f"size_t rnet_{low}_pack(const rnet_{low}_t *m, uint8_t *buf)", "{"]
+        off = 0
+        for f in m["fields"]:
+            size, ctype, signed, _ = TYPES[f["type"]]
+            src = f"(uint{8 * size}_t)m->{f['name']}" if signed else f"m->{f['name']}"
+            for i in range(size):
+                shift = f" >> {8 * i}" if i else ""
+                L.append(f"    buf[{off + i}] = (uint8_t)({src}{shift});")
+            off += size
+        L += [f"    return {off}u;", "}", "",
+              f"size_t rnet_{low}_unpack(rnet_{low}_t *m, const uint8_t *buf, size_t len)", "{",
+              "    size_t n = 0;"]
+        off = 0
+        for f in m["fields"]:
+            size, ctype, signed, _ = TYPES[f["type"]]
+            utype = f"uint{8 * size}_t"
+            parts = " | ".join(f"({utype})((uint32_t)buf[{off + i}] << {8 * i})" if i else f"({utype})buf[{off}]"
+                               for i in range(size))
+            dflt = f"RNET_{name}_{_upper(f['name'])}_INVALID" if "invalid" in f else "0"
+            L += [f"    if (len >= {off + size}u) {{",
+                  f"        m->{f['name']} = ({ctype})({utype})({parts});",
+                  "        n++;", "    } else {", f"        m->{f['name']} = {dflt};", "    }"]
+            off += size
+        L += ["    return n;", "}", ""]
+    return "\n".join(L)
+
+
+def emit_py(s: dict) -> str:
+    msgs = {}
+    for name, m in concrete_messages(s):
+        msgs[name] = {
+            "id": m["id"], "dir": m["dir"],
+            "fields": [{k: f[k] for k in ("name", "type", "scale", "unit", "invalid", "bits", "convert") if k in f}
+                       for f in m["fields"]],
+        }
+    node_types = {k: {"id": v["id"], "consts": v.get("consts", {})} for k, v in s["node_types"].items()}
+    msg_ids = {k: v["id"] for k, v in s["messages"].items()}
+    return f'''"""{BANNER}
+
+Message codec for host tools. Frames, keys and MIC: rnet.py.
+"""
+import struct
+
+SCHEMA_HASH = 0x{schema_hash(s):04X}
+NODE_TYPES = {node_types!r}
+ENUMS = {s["enums"]!r}
+MSG_IDS = {msg_ids!r}
+MESSAGES = {msgs!r}
+_FMT = {{"u8": "B", "u16": "H", "u32": "I", "i8": "b", "i16": "h", "i32": "i", "bits": "B"}}
+
+
+def pack(name: str, values: dict) -> bytes:
+    m = MESSAGES[name]
+    return b"".join(struct.pack("<" + _FMT[f["type"]], values[f["name"]]) for f in m["fields"])
+
+
+def unpack(name: str, payload: bytes) -> dict:
+    """Raw field values; a short payload leaves later fields out (ADR-0001 D3)."""
+    out, off = {{}}, 0
+    for f in MESSAGES[name]["fields"]:
+        fmt = "<" + _FMT[f["type"]]
+        size = struct.calcsize(fmt)
+        if off + size > len(payload):
+            break
+        out[f["name"]] = struct.unpack_from(fmt, payload, off)[0]
+        off += size
+    return out
+
+
+def message_name(msg_id: int):
+    return next((n for n, i in MSG_IDS.items() if i == msg_id), None)
+'''
+
+
+def emit_md(s: dict) -> str:
+    L = [f"<!-- {BANNER} -->", "# rnet messages", "",
+         f"Schema version {s['schema_version']}, hash `0x{schema_hash(s):04X}`. "
+         "Source: `schema/rnet.toml`; layouts are little-endian, physical value = raw × scale.", "",
+         "## Node types", "", "| id | name | constants |", "|---|---|---|"]
+    for name, nt in s["node_types"].items():
+        consts = ", ".join(f"`{k}` = {v}" for k, v in nt.get("consts", {}).items())
+        L.append(f"| 0x{nt['id']:02X} | `{name}` | {consts} |")
+    L += ["", "## Messages", ""]
+    for name, m in s["messages"].items():
+        L.append(f"### 0x{m['id']:02X} `{name}` ({m['dir']}link)")
+        L.append("")
+        if m.get("placeholder"):
+            L += ["Placeholder: defined when its project's firmware starts.", ""]
+            continue
+        L += ["| offset | field | type | scale | unit | invalid | notes |", "|---|---|---|---|---|---|---|"]
+        off = 0
+        for f in m["fields"]:
+            size = TYPES.get(f["type"], (0,))[0]
+            notes = f.get("note", "")
+            if "bits" in f:
+                notes = ", ".join(f"bit {p} `{b}`" for b, p in f["bits"].items())
+            if "convert" in f:
+                notes = f"× node constant `{f['convert']}`" + (f"; {notes}" if notes else "")
+            inv = f"0x{f['invalid'] & ((1 << (8 * size)) - 1):X}" if "invalid" in f and size else ""
+            L.append(f"| {off if size else '…'} | `{f['name']}` | {f['type']} | {f.get('scale', '')} | "
+                     f"{f.get('unit', '')} | {inv} | {notes} |")
+            off += size
+        if any(f["type"] != "tlv" for f in m["fields"]):
+            L.append(f"\n{off} bytes.")
+        L.append("")
+    return "\n".join(L)
+
+
+# ---- golden vectors -------------------------------------------------------
+TEST_MASTER_KEY = bytes(range(16))  # published test key: never use on a real network
+
+
+def _example_values(m: dict) -> dict:
+    vals = {}
+    for i, f in enumerate(m["fields"]):
+        size, _, signed, _ = TYPES[f["type"]]
+        v = (0x5A + 0x3D * i) * 0x01010101 & ((1 << (8 * size)) - 1)
+        if signed:
+            v -= 1 << (8 * size - 1)  # exercise negative values
+        vals[f["name"]] = v
+    return vals
+
+
+def vectors(s: dict) -> dict:
+    sys.path.insert(0, str(ROOT / "tools" / "rnet_py"))
+    import rnet  # noqa: E402  (cryptography: only needed for vectors)
+
+    sys.path.pop(0)
+    nt = s["node_types"]
+    label = s["frame"]["key_derivation"]["label"].encode()
+    out = {"schema_hash": f"0x{schema_hash(s):04X}", "master_key": TEST_MASTER_KEY.hex(),
+           "keys": [], "payloads": [], "frames": []}
+    for node_id, tname in [(0x0001, "weather_acurite"), (0x1234, "garden"), (0xFFFE, "soil")]:
+        k = rnet.derive_node_key(TEST_MASTER_KEY, node_id, nt[tname]["id"], label)
+        out["keys"].append({"node_id": node_id, "node_type": nt[tname]["id"], "key": k.hex()})
+    py = {}
+    exec(emit_py(s), py)  # the generated codec, as committed
+    for name, m in concrete_messages(s):
+        vals = _example_values(m)
+        out["payloads"].append({"msg": name, "values": vals, "payload": py["pack"](name, vals).hex()})
+    cases = [
+        ("WX_REPORT uplink", 0x0001, "weather_acurite", 0, 0x00000001, "WX_REPORT", None),
+        ("HEALTH uplink, RX_OPEN", 0x0001, "weather_acurite", 1 << 3, 0x000100FF, "HEALTH", None),
+        ("TIME downlink, acks 0x0102", 0x1234, "garden", 1 << 5, 0xFFFFFFFE, "TIME", 0x0102),
+    ]
+    payloads = {p["msg"]: bytes.fromhex(p["payload"]) for p in out["payloads"]}
+    for desc, node_id, tname, ctrl, ctr, msg, ack in cases:
+        key = rnet.derive_node_key(TEST_MASTER_KEY, node_id, nt[tname]["id"], label)
+        h = rnet.Header(ctrl=ctrl, net_id=0x5A, node_id=node_id, node_type=nt[tname]["id"], ctr=ctr,
+                        msg_type=s["messages"][msg]["id"], ack_ctr=ack)
+        frame = rnet.build_frame(key, h, payloads[msg])
+        out["frames"].append({"desc": desc, "key": key.hex(), "ctrl": ctrl, "net_id": 0x5A, "node_id": node_id,
+                              "node_type": nt[tname]["id"], "ctr": ctr, "msg": msg, "ack_ctr": ack,
+                              "payload": payloads[msg].hex(), "frame": frame.hex()})
+    return out
+
+
+def emit_vectors_json(s: dict) -> str:
+    return json.dumps(vectors(s), indent=2) + "\n"
+
+
+def emit_vectors_h(s: dict) -> str:
+    v = vectors(s)
+
+    def arr(h: str) -> str:
+        b = bytes.fromhex(h)
+        return "{" + ", ".join(f"0x{x:02X}" for x in b) + "}" if b else "{0}"
+
+    L = [f"/* {BANNER} */", "/* Golden vectors (test/vectors/frames.json) for the C tests. */",
+         "#ifndef RNET_VECTORS_H", "#define RNET_VECTORS_H", "", "#include <stdint.h>", "",
+         f"static const uint8_t vec_master_key[16] = {arr(v['master_key'])};", "",
+         "typedef struct { uint16_t node_id; uint8_t node_type; uint8_t key[16]; } vec_key_t;",
+         "static const vec_key_t vec_keys[] = {"]
+    for k in v["keys"]:
+        L.append(f"    {{0x{k['node_id']:04X}u, 0x{k['node_type']:02X}u, {arr(k['key'])}}},")
+    L += ["};", "",
+          "typedef struct { const char *desc; uint8_t key[16]; uint8_t ctrl, net_id; uint16_t node_id;",
+          "    uint8_t node_type; uint32_t ctr; uint8_t msg_type; int32_t ack_ctr; /* -1 = none */",
+          "    uint8_t payload[64]; uint8_t payload_len; uint8_t frame[64]; uint8_t frame_len; } vec_frame_t;",
+          "static const vec_frame_t vec_frames[] = {"]
+    for f in v["frames"]:
+        pl, fl = bytes.fromhex(f["payload"]), bytes.fromhex(f["frame"])
+        L.append(f'    {{"{f["desc"]}", {arr(f["key"])}, 0x{f["ctrl"]:02X}u, 0x{f["net_id"]:02X}u, '
+                 f'0x{f["node_id"]:04X}u, 0x{f["node_type"]:02X}u, 0x{f["ctr"]:08X}u, '
+                 f'0x{s["messages"][f["msg"]]["id"]:02X}u, {f["ack_ctr"] if f["ack_ctr"] is not None else -1}, '
+                 f'{arr(f["payload"])}, {len(pl)}u, {arr(f["frame"])}, {len(fl)}u}},')
+    L += ["};", "", "#endif", ""]
+    return "\n".join(L)
+
+
 # ---------------------------------------------------------------------------
 def outputs(s: dict) -> dict[Path, str]:
+    check_schema(s)
     return {
         ROOT / "lib/rnet/gen/rnet_phy.h": emit_phy_h(s),
+        ROOT / "lib/rnet/gen/rnet_msgs.h": emit_msgs_h(s),
+        ROOT / "lib/rnet/gen/rnet_msgs.c": emit_msgs_c(s),
+        ROOT / "tools/rnet_py/rnet_msgs.py": emit_py(s),
+        ROOT / "docs/generated/messages.md": emit_md(s),
+        ROOT / "test/vectors/frames.json": emit_vectors_json(s),
+        ROOT / "test/vectors/frames.h": emit_vectors_h(s),
     }
 
 
