@@ -1,6 +1,6 @@
 # 01 — Home radio network: architecture
 
-*Version 0.11, 2026-10-12. The shared 915 MHz radio architecture for every battery/solar node Andrew builds, and the one indoor gateway that bridges them to Home Assistant. Anything marked **Proposed** is not decided until the owner accepts it. Change log at the end.*
+*Version 0.12, 2026-10-31. The shared 915 MHz radio architecture for every battery/solar node Andrew builds, and the one indoor gateway that bridges them to Home Assistant. Anything marked **Proposed** is not decided until the owner accepts it. Change log at the end.*
 
 ## 1. Who uses it
 
@@ -231,4 +231,5 @@ No open standard fits **CC1101 + years-on-small-solar + an ESPHome gateway** off
 - **0.8 (2026-10-10):** ADR-0002: probe = the owner's HiLetgo ST-LINK/V2 clone (SWDIO/SWCLK/GND/RST on the 2.54 mm header, no 3V3); USART1 log through a 3.3 V USB-UART, RTT as fallback; firmware rule: `DBG_STOP` in Debug builds and a ~2 s delay before the first Stop entry so SWD can always attach.
 - **0.9 (2026-10-10):** ADR-0002 **accepted**. `lib/node_l0` started: toolchain file, L051 linker script, vendored ST LL/CMSIS (pinned), EEPROM wear-levelled ring with host tests, clocks/RTC/Stop/IWDG/reset-cause/EEPROM/UART log (compile-checked), smoke image (2.3 KB). Root CMake presets and GitHub Actions CI added. CC1101 driver waits for the generator.
 - **0.10 (2026-10-10):** `lib/node_l0` headers get `extern "C"` guards and the toolchain file C++ flags, so node applications may be C++17 (weather_station ADR-0003 D1 amendment). The shared libraries stay C99.
+- **0.12 (2026-10-31):** Schema **accepted** (owner): sync word `0xB54E`, `HEALTH` fields as drafted. Implementation (owner decisions): C++17 for the shared libraries and generated code; **RadioLib** 7.8.1 (vendored, `lib/vendor/RadioLib`) drives the CC1101 and provides AES-128/CMAC; `tools/rnetgen` emits PHY parameters, message structs, Python codec, docs and golden vectors; `lib/node_l0` gains the EEPROM identity record + uplink counter (rnet region 0x000-0x0FF) and the RadioLib HAL for bare-metal STM32L0; `tools/link_test` is an ESP32 bench receiver. Gateway: ESPHome, with raw MQTT as the fallback if that proves easier.
 - **0.11 (2026-10-12):** **Accepted (owner, 2026-10-12):** node type `weather_misol` = 0x03 (weather_station ADR-0004: Misol/Fine Offset sensors on the AcuRite board). The gateway's per-type rain constant changes from µm to **nm per tip** (`rain_nm_per_tip`), so Misol's 0.2794 mm is exact instead of rounding to 279 µm. Nothing is generated or deployed yet, so no version bump.

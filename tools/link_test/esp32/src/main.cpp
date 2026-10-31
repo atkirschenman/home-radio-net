@@ -1,223 +1,246 @@
-// Bench receiver (bench only). ESP32 DevKitC + CC1101 module on VSPI.
-//  - Link-test packets: RSSI/LQI each, lost sequence numbers, a summary
-//    every 30 s.
-//  - rnet frames: header, MIC checked under the key derived from the
-//    published TEST master key (unprovisioned nodes use it), replay check per
-//    node, WX_REPORT and HEALTH decoded into units. Anything else: hex dump.
+// acronym  meaning
+// rnet     home radio network (this protocol)
+// mic      message integrity code: truncated AES-CMAC
+// lqi      link quality indicator (CC1101)
+// csn      chip select, active low
+// gdo      CC1101 general digital output pin
 //
-// Wiring (module pin -> DevKitC), 3.3 V only:
-//   VCC -> 3V3   GND -> GND   SCK -> 18   MISO/SO -> 19   MOSI/SI -> 23
-//   CSN -> 5     GDO0 -> 21 (unused by the driver)   GDO2 -> 22 (unused)
+// wiring, module pin -> ESP32 DevKitC, 3.3 V only
+//
+//   module  VCC  GND  SCK  MISO  MOSI  CSN  GDO0  GDO2
+//   esp32   3V3  GND  18   19    23    5    21    22
 #include <Arduino.h>
+#include <RadioLib.h>
 #include <SPI.h>
 
-extern "C" {
-#include "linktest.h"
-#include "node_l0/cc1101.h"
-#include "node_l0/rnet_node.h"
-#include "rnet/rnet.h"
-#include "rnet_phy.h"
-}
+#include "link_test_packet.hpp"
+#include "rnet/cc1101_config.hpp"
+#include "rnet/rnet.hpp"
 
 namespace
 {
 
-constexpr int kSck = 18, kMiso = 19, kMosi = 23, kCsn = 5;
-constexpr uint8_t kPatable = 0x1E; // -15 dBm; the receiver doesn't transmit here
-constexpr uint32_t kSummaryMs = 30000;
+constexpr int sck_pin = 18, miso_pin = 19, mosi_pin = 23, csn_pin = 5, gdo0_pin = 21, gdo2_pin = 22;
+constexpr int8_t receiver_power_dbm = -15;
+constexpr uint32_t receive_timeout_ms = 1000;
+constexpr uint32_t summary_period_ms = 30000;
+constexpr uint16_t no_direction = 0xFFFF;
+constexpr size_t max_known_nodes = 8;
 
-SPISettings g_spi(1000000, MSBFIRST, SPI_MODE0);
+CC1101 radio = new Module(csn_pin, gdo0_pin, RADIOLIB_NC, gdo2_pin);
 
-void sel(void *, bool on)
-{
-    if (on) {
-        SPI.beginTransaction(g_spi);
-        digitalWrite(kCsn, LOW);
-    } else {
-        digitalWrite(kCsn, HIGH);
-        SPI.endTransaction();
-    }
-}
-uint8_t xfer(void *, uint8_t b)
-{
-    return SPI.transfer(b);
-}
-bool miso(void *)
-{
-    return digitalRead(kMiso) == HIGH;
-}
-void dly(void *, uint32_t us)
-{
-    delayMicroseconds(us);
-}
-
-const nl0_cc1101_bus_t kBus = {sel, xfer, miso, dly, nullptr};
-nl0_cc1101_t g_radio;
-
-struct Stats {
-    uint32_t rx = 0, lost = 0, other = 0;
-    int32_t rssi_sum = 0;
-    int16_t rssi_min = 0, rssi_max = -200;
-    bool have_seq = false;
-    uint32_t last_seq = 0;
-} g_st;
-
-void verify_registers()
-{
-    int bad = 0;
-    for (uint32_t i = 0; i < RNET_CC1101_NREGS; i++) {
-        uint8_t a = rnet_cc1101_regs[i][0], want = rnet_cc1101_regs[i][1];
-        uint8_t got = nl0_cc1101_read(&g_radio, a);
-        if (got != want) {
-            Serial.printf("  reg 0x%02X wrote 0x%02X read 0x%02X\n", a, want, got);
-            bad++;
-        }
-    }
-    Serial.printf("register readback: %s (%d of %u differ)\n", bad ? "FAIL" : "ok", bad,
-                  (unsigned)RNET_CC1101_NREGS);
-}
-
-void summary()
-{
-    uint32_t total = g_st.rx + g_st.lost;
-    Serial.printf(
-        "== rx=%lu lost=%lu (%.1f%%) other=%lu rssi min/avg/max=%d/%ld/%d dBm\n",
-        (unsigned long)g_st.rx, (unsigned long)g_st.lost, total ? 100.0 * g_st.lost / total : 0.0,
-        (unsigned long)g_st.other, g_st.rx ? g_st.rssi_min : 0,
-        g_st.rx ? (long)(g_st.rssi_sum / (int32_t)g_st.rx) : 0L, g_st.rx ? g_st.rssi_max : 0);
-}
-
-// ---- rnet frames ----
-struct Peer {
-    bool used;
-    uint16_t node_id;
-    uint8_t node_type;
-    rnet_rx_state_t rx;
+struct link_statistics {
+    uint32_t received = 0;
+    uint32_t lost = 0;
+    uint32_t unrecognised = 0;
+    float rssi_sum = 0;
+    float rssi_min = 0;
+    float rssi_max = -200;
+    bool have_sequence = false;
+    uint32_t last_sequence = 0;
 };
-Peer g_peers[8];
+link_statistics link_stats;
 
-Peer *peer(uint16_t id, uint8_t type)
+struct known_node {
+    bool used = false;
+    uint16_t node_id = 0;
+    uint8_t node_type = 0;
+    rnet::receive_counter counter;
+};
+known_node known_nodes[max_known_nodes];
+
+struct packet_quality {
+    float rssi_dbm;
+    uint8_t lqi;
+};
+
+void print_link_summary()
 {
-    for (Peer &p : g_peers) {
-        if (p.used && p.node_id == id && p.node_type == type) {
-            return &p;
+    const uint32_t expected = link_stats.received + link_stats.lost;
+    const float loss_percent = expected ? 100.f * link_stats.lost / expected : 0.f;
+    const float rssi_average =
+        link_stats.received ? link_stats.rssi_sum / link_stats.received : 0.f;
+    Serial.printf(
+        "== received=%lu lost=%lu (%.1f%%) unrecognised=%lu rssi min/avg/max=%.1f/%.1f/%.1f dBm\n",
+        (unsigned long)link_stats.received, (unsigned long)link_stats.lost, loss_percent,
+        (unsigned long)link_stats.unrecognised, link_stats.rssi_min, rssi_average,
+        link_stats.rssi_max);
+}
+
+void record_link_test_packet(uint32_t sequence, uint8_t power_setting, uint16_t battery_mv,
+                             packet_quality quality)
+{
+    if (link_stats.have_sequence && sequence <= link_stats.last_sequence) {
+        Serial.println("(sequence restarted: node reset)");
+    }
+    const bool gap = link_stats.have_sequence && sequence > link_stats.last_sequence + 1;
+    if (gap) {
+        link_stats.lost += sequence - link_stats.last_sequence - 1;
+    }
+    link_stats.received++;
+    link_stats.rssi_sum += quality.rssi_dbm;
+    link_stats.rssi_min =
+        link_stats.received == 1 ? quality.rssi_dbm : min(link_stats.rssi_min, quality.rssi_dbm);
+    link_stats.rssi_max = max(link_stats.rssi_max, quality.rssi_dbm);
+    link_stats.have_sequence = true;
+    link_stats.last_sequence = sequence;
+    Serial.printf("sequence=%lu rssi=%.1f lqi=%u power_setting=0x%02X battery=%u mV%s\n",
+                  (unsigned long)sequence, quality.rssi_dbm, quality.lqi, power_setting, battery_mv,
+                  gap ? " (gap)" : "");
+}
+
+known_node *find_or_add_node(uint16_t node_id, uint8_t node_type)
+{
+    for (known_node &node : known_nodes) {
+        if (node.used && node.node_id == node_id && node.node_type == node_type) {
+            return &node;
         }
     }
-    for (Peer &p : g_peers) {
-        if (!p.used) {
-            p = Peer{true, id, type, {}};
-            return &p;
+    for (known_node &node : known_nodes) {
+        if (!node.used) {
+            node = known_node{};
+            node.used = true;
+            node.node_id = node_id;
+            node.node_type = node_type;
+            return &node;
         }
     }
     return nullptr;
 }
 
-uint32_t rain_nm_per_tip(uint8_t type)
+uint32_t rain_nm_per_tip(uint8_t node_type)
 {
-    switch (type) {
-    case RNET_NODE_WEATHER_ACURITE:
-        return RNET_NODE_WEATHER_ACURITE_RAIN_NM_PER_TIP;
-    case RNET_NODE_WEATHER_WS69:
-        return RNET_NODE_WEATHER_WS69_RAIN_NM_PER_TIP;
-    case RNET_NODE_WEATHER_MISOL:
-        return RNET_NODE_WEATHER_MISOL_RAIN_NM_PER_TIP;
+    switch (node_type) {
+    case rnet::node::weather_acurite:
+        return rnet::node::weather_acurite_rain_nm_per_tip;
+    case rnet::node::weather_ws69:
+        return rnet::node::weather_ws69_rain_nm_per_tip;
+    case rnet::node::weather_misol:
+        return rnet::node::weather_misol_rain_nm_per_tip;
     default:
         return 0;
     }
 }
 
-void print_dir(const char *k, uint16_t d)
+void print_direction(const char *label, uint16_t tenths_of_degree)
 {
-    if (d == 0xFFFF) {
-        Serial.printf(" %s=-", k);
+    if (tenths_of_degree == no_direction) {
+        Serial.printf(" %s=-", label);
     } else {
-        Serial.printf(" %s=%.1f", k, d / 10.0);
+        Serial.printf(" %s=%.1f", label, tenths_of_degree / 10.0);
     }
 }
 
-void print_wx(const rnet_wx_report_t &m, uint8_t type)
+void print_weather_report(const rnet::wx_report &report, uint8_t node_type)
 {
-    Serial.printf("  WX int=%us wind mean/gust/lull=%.2f/%.2f/%.2f m/s", m.interval_s,
-                  m.wind_mean / 100.0, m.wind_gust / 100.0, m.wind_lull / 100.0);
-    print_dir("dir", m.wind_dir);
-    print_dir("dir_gust", m.wind_dir_gust);
-    Serial.printf("\n     rain=%lu tips (%.2f mm)", (unsigned long)m.rain_tips,
-                  m.rain_tips * (double)rain_nm_per_tip(type) / 1e6);
-    if (m.temp == RNET_WX_REPORT_TEMP_INVALID) {
-        Serial.print(" T=-");
+    Serial.printf("  weather interval=%us wind mean/gust/lull=%.2f/%.2f/%.2f m/s",
+                  report.interval_s, report.wind_mean / 100.0, report.wind_gust / 100.0,
+                  report.wind_lull / 100.0);
+    print_direction("direction", report.wind_dir);
+    print_direction("direction_at_gust", report.wind_dir_gust);
+    const double rain_mm = report.rain_tips * (double)rain_nm_per_tip(node_type) / 1e6;
+    Serial.printf("\n     rain=%lu tips (%.2f mm)", (unsigned long)report.rain_tips, rain_mm);
+    if (report.temp == rnet::wx_report::temp_invalid) {
+        Serial.print(" temperature=-");
     } else {
-        Serial.printf(" T=%.2f C", m.temp / 100.0);
+        Serial.printf(" temperature=%.2f C", report.temp / 100.0);
     }
-    if (m.rh == RNET_WX_REPORT_RH_INVALID) {
-        Serial.print(" RH=-");
+    if (report.rh == rnet::wx_report::rh_invalid) {
+        Serial.print(" humidity=-");
     } else {
-        Serial.printf(" RH=%.1f %%", m.rh / 100.0);
+        Serial.printf(" humidity=%.1f %%", report.rh / 100.0);
     }
-    if (m.pressure == RNET_WX_REPORT_PRESSURE_INVALID) {
-        Serial.print(" P=-");
+    if (report.pressure == rnet::wx_report::pressure_invalid) {
+        Serial.print(" pressure=-");
     } else {
-        Serial.printf(" P=%.2f hPa", m.pressure / 100.0);
+        Serial.printf(" pressure=%.2f hPa", report.pressure / 100.0);
     }
-    Serial.printf(" vbat=%u mV flags=0x%02X", m.vbat, m.flags);
-    if (m.flags & RNET_WX_REPORT_FLAGS_PREV_VALID) {
-        Serial.printf(" prev=%.2f/%.2f/%.2f", m.prev_mean / 100.0, m.prev_gust / 100.0,
-                      m.prev_lull / 100.0);
+    Serial.printf(" battery=%u mV flags=0x%02X", report.vbat, report.flags);
+    if (report.flags & rnet::wx_report::flags_prev_valid) {
+        Serial.printf(" previous=%.2f/%.2f/%.2f", report.prev_mean / 100.0,
+                      report.prev_gust / 100.0, report.prev_lull / 100.0);
     }
     Serial.println();
 }
 
-void print_health(const rnet_health_t &m)
+void print_health(const rnet::health &health)
 {
-    Serial.printf("  HEALTH vbat=%u vpanel=%u mV board=%.1f C dl_rssi=%d up=%lus fw=%u.%u "
-                  "schema=0x%04X%s reset=%u\n",
-                  m.vbat, m.vpanel, m.board_temp / 10.0, m.dl_rssi, (unsigned long)m.uptime,
-                  m.fw_version >> 8, m.fw_version & 0xFF, m.schema_hash,
-                  m.schema_hash == RNET_SCHEMA_HASH ? "" : " (MISMATCH)", m.reset_cause);
+    const bool schema_matches = health.schema_hash == rnet::phy::schema_hash;
+    Serial.printf("  health battery=%u panel=%u mV board=%.1f C downlink_rssi=%d uptime=%lus "
+                  "firmware=%u.%u schema=0x%04X%s reset_cause=%u\n",
+                  health.vbat, health.vpanel, health.board_temp / 10.0, health.dl_rssi,
+                  (unsigned long)health.uptime, health.fw_version >> 8, health.fw_version & 0xFF,
+                  health.schema_hash, schema_matches ? "" : " (MISMATCH)", health.reset_cause);
 }
 
-// True if buf was an rnet frame (whatever its fate), false to hex-dump it.
-bool handle_rnet(const uint8_t *buf, uint8_t len, const nl0_cc1101_rx_t &rx)
+void print_payload(const rnet::parsed_frame &frame)
 {
-    rnet_hdr_t h;
-    const uint8_t *pl;
-    size_t pl_len;
-    if (!rnet_frame_parse(buf, len, &h, &pl, &pl_len)) {
+    const uint8_t node_type = frame.header.node_type;
+    if (frame.header.message_type == rnet::wx_report::id) {
+        rnet::wx_report report;
+        report.unpack(frame.payload, frame.payload_length);
+        print_weather_report(report, node_type);
+    } else if (frame.header.message_type == rnet::health::id) {
+        rnet::health health;
+        health.unpack(frame.payload, frame.payload_length);
+        print_health(health);
+    }
+}
+
+bool handle_rnet_frame(const uint8_t *bytes, size_t length, packet_quality quality)
+{
+    rnet::parsed_frame frame;
+    if (!rnet::parse_frame_without_mic_check(bytes, length, frame)) {
         return false;
     }
-    uint8_t key[RNET_KEY_LEN];
-    rnet_derive_key(nl0_test_master_key, h.node_id, h.node_type, key);
-    Serial.printf("rnet node=0x%04X type=0x%02X net=0x%02X ctr=%lu msg=0x%02X ctrl=0x%02X "
-                  "rssi=%d lqi=%u",
-                  h.node_id, h.node_type, h.net_id, (unsigned long)h.ctr, h.msg_type, h.ctrl,
-                  rx.rssi, rx.lqi);
-    if (!rnet_frame_verify(key, buf, len)) {
-        Serial.println(" BAD MIC (not the test key, or corrupt)");
+    const rnet::frame_header &h = frame.header;
+    Serial.printf("rnet node=0x%04X type=0x%02X net=0x%02X counter=%lu message=0x%02X "
+                  "control=0x%02X rssi=%.1f lqi=%u",
+                  h.node_id, h.node_type, h.net_id, (unsigned long)h.counter, h.message_type,
+                  h.control, quality.rssi_dbm, quality.lqi);
+
+    const rnet::aes_key key = rnet::derive_node_key(rnet::test_master_key, h.node_id, h.node_type);
+    if (!rnet::mic_is_valid(key, bytes, length)) {
+        Serial.println(" MIC INVALID (not the test key, or corrupt)");
         return true;
     }
-    Peer *p = peer(h.node_id, h.node_type);
-    rnet_replay_t r = p ? rnet_replay_check(&p->rx, h.ctr) : RNET_FRESH;
-    if (r == RNET_DUPLICATE) {
+    known_node *node = find_or_add_node(h.node_id, h.node_type);
+    const rnet::replay_verdict verdict =
+        node ? node->counter.judge(h.counter) : rnet::replay_verdict::fresh;
+    if (verdict == rnet::replay_verdict::duplicate) {
         Serial.println(" (repeat)");
         return true;
     }
-    if (r == RNET_REPLAY) {
-        Serial.printf(" REPLAY/old counter (last %lu)\n", (unsigned long)p->rx.last);
+    if (verdict == rnet::replay_verdict::old) {
+        Serial.printf(" REPLAY: counter not above %lu\n",
+                      (unsigned long)node->counter.last_accepted());
         return true;
     }
-    if (p) {
-        rnet_replay_accept(&p->rx, h.ctr);
+    if (node) {
+        node->counter.accept(h.counter);
     }
-    Serial.println(h.ctrl & RNET_CTRL_RX_OPEN ? " RX_OPEN" : "");
-    if (h.msg_type == RNET_MSG_WX_REPORT) {
-        rnet_wx_report_t m;
-        rnet_wx_report_unpack(&m, pl, pl_len);
-        print_wx(m, h.node_type);
-    } else if (h.msg_type == RNET_MSG_HEALTH) {
-        rnet_health_t m;
-        rnet_health_unpack(&m, pl, pl_len);
-        print_health(m);
-    }
+    Serial.println(h.control & rnet::control_bits::rx_open ? " listening for a downlink" : "");
+    print_payload(frame);
     return true;
+}
+
+void print_unrecognised(const uint8_t *bytes, size_t length, packet_quality quality)
+{
+    link_stats.unrecognised++;
+    Serial.printf("unrecognised length=%u rssi=%.1f:", (unsigned)length, quality.rssi_dbm);
+    for (size_t i = 0; i < length; i++) {
+        Serial.printf(" %02X", bytes[i]);
+    }
+    Serial.println();
+}
+
+void handle_packet(const uint8_t *bytes, size_t length, packet_quality quality)
+{
+    if (const auto link = link_test::read_packet(bytes, length)) {
+        record_link_test_packet(link->sequence, link->power_setting, link->battery_mv, quality);
+    } else if (!handle_rnet_frame(bytes, length, quality)) {
+        print_unrecognised(bytes, length, quality);
+    }
 }
 
 } // namespace
@@ -226,64 +249,34 @@ void setup()
 {
     Serial.begin(115200);
     delay(500);
-    pinMode(kCsn, OUTPUT);
-    digitalWrite(kCsn, HIGH);
-    SPI.begin(kSck, kMiso, kMosi, -1);
-
-    Serial.printf("\nrnet link test receiver: %.4f MHz, %u bps, sync 0x%04X, schema 0x%04X\n",
-                  RNET_PHY_FREQ_HZ / 1e6, (unsigned)RNET_PHY_DATA_RATE_BPS,
-                  (unsigned)RNET_PHY_SYNC_WORD, (unsigned)RNET_SCHEMA_HASH);
-    nl0_cc1101_err_t e = nl0_cc1101_init(&g_radio, &kBus, kPatable);
-    Serial.printf("cc1101 init: %d (0 = ok), VERSION 0x%02X\n", (int)e, g_radio.version);
-    if (e != NL0_CC1101_OK) {
+    SPI.begin(sck_pin, miso_pin, mosi_pin, csn_pin);
+    Serial.printf("\nrnet bench receiver: %.4f MHz, %.1f kbps, sync 0x%02X%02X, schema 0x%04X\n",
+                  rnet::phy::frequency_mhz, rnet::phy::bit_rate_kbps, rnet::phy::sync_word_high,
+                  rnet::phy::sync_word_low, rnet::phy::schema_hash);
+    const int16_t status = rnet::configure_cc1101(radio, receiver_power_dbm);
+    Serial.printf("cc1101 (RadioLib): %d (0 = ok)\n", status);
+    if (status != RADIOLIB_ERR_NONE) {
         Serial.println("check wiring and 3.3 V; halted");
         for (;;) {
             delay(1000);
         }
     }
-    verify_registers();
     Serial.println("listening...");
 }
 
 void loop()
 {
-    static uint32_t last_summary = millis();
-    uint8_t buf[RNET_PHY_MAX_PAYLOAD];
-    nl0_cc1101_rx_t rx;
-    if (nl0_cc1101_recv(&g_radio, buf, &rx, 1000) == NL0_CC1101_OK) {
-        uint32_t seq;
-        uint8_t pt;
-        uint16_t vbat;
-        if (linktest_parse(buf, rx.len, &seq, &pt, &vbat)) {
-            uint32_t gap = 0;
-            if (g_st.have_seq && seq > g_st.last_seq + 1) {
-                gap = seq - g_st.last_seq - 1;
-            }
-            if (g_st.have_seq && seq <= g_st.last_seq) {
-                Serial.println("(sequence restarted: node reset)");
-            }
-            g_st.lost += gap;
-            g_st.rx++;
-            g_st.rssi_sum += rx.rssi;
-            g_st.rssi_min = g_st.rx == 1 ? rx.rssi : min(g_st.rssi_min, rx.rssi);
-            g_st.rssi_max = max(g_st.rssi_max, rx.rssi);
-            g_st.have_seq = true;
-            g_st.last_seq = seq;
-            Serial.printf("seq=%lu rssi=%d lqi=%u pa=0x%02X vbat=%u%s\n", (unsigned long)seq,
-                          rx.rssi, rx.lqi, pt, vbat, gap ? " (gap)" : "");
-        } else if (handle_rnet(buf, rx.len, rx)) {
-            // printed
-        } else {
-            g_st.other++;
-            Serial.printf("other len=%u rssi=%d:", rx.len, rx.rssi);
-            for (uint8_t i = 0; i < rx.len; i++) {
-                Serial.printf(" %02X", buf[i]);
-            }
-            Serial.println();
-        }
+    static uint32_t last_summary_ms = millis();
+    uint8_t bytes[rnet::phy::max_packet_length];
+    const int16_t status = radio.receive(bytes, sizeof bytes, receive_timeout_ms);
+    if (status == RADIOLIB_ERR_NONE) {
+        handle_packet(bytes, radio.getPacketLength(),
+                      packet_quality{radio.getRSSI(), radio.getLQI()});
+    } else if (status != RADIOLIB_ERR_RX_TIMEOUT) {
+        Serial.printf("receive error %d\n", status);
     }
-    if (millis() - last_summary >= kSummaryMs) {
-        last_summary = millis();
-        summary();
+    if (millis() - last_summary_ms >= summary_period_ms) {
+        last_summary_ms = millis();
+        print_link_summary();
     }
 }

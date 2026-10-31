@@ -1,22 +1,15 @@
 #!/usr/bin/env python3
-"""rnetgen: everything generated from schema/rnet.toml (ADR-0001 D2).
+"""Generates every protocol artefact from schema/rnet.toml.
 
-Python 3.11+ (tomllib). The code outputs need only the stdlib; the golden
-vectors use tools/rnet_py/rnet.py, which takes AES/CMAC from the
-`cryptography` package (owner, 2026-10-31: known libraries over our own).
-Outputs are committed; `--check` regenerates in memory and fails if any
-committed file differs (CI).
+    python3 tools/rnetgen/rnetgen.py           write the outputs
+    python3 tools/rnetgen/rnetgen.py --check   exit 1 if a committed output differs
 
-    python3 tools/rnetgen/rnetgen.py           # write all outputs
-    python3 tools/rnetgen/rnetgen.py --check   # CI: fail on drift
-
-Outputs (paths relative to the repo root):
-    lib/rnet/gen/rnet_phy.h   CC1101 register table + PHY constants
-    lib/rnet/gen/rnet_msgs.h  message structs, ids, pack/unpack prototypes
-    lib/rnet/gen/rnet_msgs.c  pack/unpack (explicit byte shifts)
-    tools/rnet_py/rnet_msgs.py  Python codec
-    docs/generated/messages.md  message tables
-    test/vectors/frames.json    golden frames (CMAC under a published test key)
+    output                          contents
+    lib/rnet/gen/rnet_phy.hpp       PHY parameters for RadioLib's CC1101 driver
+    lib/rnet/gen/rnet_msgs.hpp/cpp  message structs, pack/unpack
+    tools/rnet_py/rnet_msgs.py      Python codec
+    docs/generated/messages.md      message tables
+    test/vectors/frames.json/hpp    golden frames under the published test key
 """
 from __future__ import annotations
 
@@ -44,161 +37,41 @@ def schema_hash(s: dict) -> int:
 
 
 # ---------------------------------------------------------------------------
-# PHY: CC1101 registers (TI SWRS061I). Formulas from the datasheet sections
-# named per field; the rest is SmartRF Studio's 38.4 kBaud GFSK baseline.
+# PHY: the parameters RadioLib's CC1101 driver takes (it does the register
+# maths). Same values on every node and the gateway.
 # ---------------------------------------------------------------------------
-CC1101_REG = {
-    "IOCFG2": 0x00, "IOCFG1": 0x01, "IOCFG0": 0x02, "FIFOTHR": 0x03, "SYNC1": 0x04,
-    "SYNC0": 0x05, "PKTLEN": 0x06, "PKTCTRL1": 0x07, "PKTCTRL0": 0x08, "ADDR": 0x09,
-    "CHANNR": 0x0A, "FSCTRL1": 0x0B, "FSCTRL0": 0x0C, "FREQ2": 0x0D, "FREQ1": 0x0E,
-    "FREQ0": 0x0F, "MDMCFG4": 0x10, "MDMCFG3": 0x11, "MDMCFG2": 0x12, "MDMCFG1": 0x13,
-    "MDMCFG0": 0x14, "DEVIATN": 0x15, "MCSM2": 0x16, "MCSM1": 0x17, "MCSM0": 0x18,
-    "FOCCFG": 0x19, "BSCFG": 0x1A, "AGCCTRL2": 0x1B, "AGCCTRL1": 0x1C, "AGCCTRL0": 0x1D,
-    "WORCTRL": 0x20, "FREND1": 0x21, "FREND0": 0x22, "FSCAL3": 0x23, "FSCAL2": 0x24,
-    "FSCAL1": 0x25, "FSCAL0": 0x26, "TEST2": 0x2C, "TEST1": 0x2D, "TEST0": 0x2E,
-}
-
-
-def _freq_word(f_hz: int, xtal: int) -> int:  # 12 "Frequency programming"
-    return round(f_hz * (1 << 16) / xtal)
-
-
-def _drate(r_bps: int, xtal: int) -> tuple[int, int, float]:  # 12 "Data rate programming"
-    best = None
-    for e in range(16):
-        m = round(r_bps * (1 << 28) / (xtal * (1 << e))) - 256
-        if 0 <= m <= 255:
-            actual = (256 + m) * (1 << e) * xtal / (1 << 28)
-            err = abs(actual - r_bps)
-            if best is None or err < best[2]:
-                best = (e, m, err, actual)
-    assert best, "data rate out of range"
-    return best[0], best[1], best[3]
-
-
-def _deviation(f_dev: int, xtal: int) -> tuple[int, int, float]:  # 16.1 "Frequency deviation"
-    best = None
-    for e in range(8):
-        for m in range(8):
-            actual = xtal / (1 << 17) * (8 + m) * (1 << e)
-            if best is None or abs(actual - f_dev) < abs(best[2] - f_dev):
-                best = (e, m, actual)
-    return best
-
-
-def _chanbw(bw: int, xtal: int) -> tuple[int, int, float]:  # 13 "Receiver channel filter bandwidth"
-    best = None
-    for e in range(4):
-        for m in range(4):
-            actual = xtal / (8 * (4 + m) * (1 << e))
-            if best is None or abs(actual - bw) < abs(best[2] - bw):
-                best = (e, m, actual)
-    return best
-
-
-def phy_registers(s: dict) -> tuple[list[tuple[str, int]], dict]:
+def emit_phy_hpp(s: dict) -> str:
     p = s["phy"]
-    xtal = p["xtal_hz"]
     assert p["modulation"] == "gfsk" and p["packet_length"] == "variable"
-    assert p["sync_mode"] == "30/32" and p["preamble_bytes"] == 4
-
-    fw = _freq_word(p["freq_hz"], xtal)
-    de, dm, rate = _drate(p["data_rate_bps"], xtal)
-    ve, vm, dev = _deviation(p["deviation_hz"], xtal)
-    be, bm, bw = _chanbw(p["rx_bw_hz"], xtal)
+    assert p["sync_mode"] == "30/32", "RadioLib: 30/32 = 16-bit sync word sent twice (repeatSync)"
     sync = p["sync_word"]
-    max_len = s["frame"]["max_payload"]
-
-    regs = [
-        ("IOCFG2", 0x07),   # GDO2: CRC-OK packet in the RX FIFO (until read)
-        ("IOCFG1", 0x2E),   # GDO1/SO: high impedance when CSn is high
-        ("IOCFG0", 0x06),   # GDO0: sync word sent/received, until end of packet
-        ("FIFOTHR", 0x47),  # ADC retention (needed for RX after SLEEP), TX/RX threshold 33/32
-        ("SYNC1", (sync >> 8) & 0xFF),
-        ("SYNC0", sync & 0xFF),
-        ("PKTLEN", max_len),  # variable mode: longest accepted length byte
-        ("PKTCTRL1", 0x0C),   # CRC autoflush, append RSSI + LQI, no address check
-        ("PKTCTRL0", (0x40 if p["whitening"] else 0) | (0x04 if p["crc16"] else 0) | 0x01),
-        ("ADDR", 0x00),
-        ("CHANNR", 0x00),
-        ("FSCTRL1", 0x06),  # IF 152 kHz (SmartRF, 38.4 kBaud)
-        ("FSCTRL0", 0x00),
-        ("FREQ2", (fw >> 16) & 0xFF),
-        ("FREQ1", (fw >> 8) & 0xFF),
-        ("FREQ0", fw & 0xFF),
-        ("MDMCFG4", (be << 6) | (bm << 4) | de),
-        ("MDMCFG3", dm),
-        ("MDMCFG2", 0x13),  # GFSK, no Manchester, 30/32 sync bits
-        ("MDMCFG1", 0x22),  # no FEC, 4 preamble bytes, CHANSPC_E 2
-        ("MDMCFG0", 0xF8),
-        ("DEVIATN", (ve << 4) | vm),
-        ("MCSM2", 0x07),
-        ("MCSM1", 0x00),    # no CCA (ALOHA, 6.1); RX and TX end in IDLE
-        ("MCSM0", 0x18),    # calibrate on IDLE -> RX/TX; PO_TIMEOUT ~150 µs
-        ("FOCCFG", 0x16),
-        ("BSCFG", 0x6C),
-        ("AGCCTRL2", 0x43),
-        ("AGCCTRL1", 0x40),
-        ("AGCCTRL0", 0x91),
-        ("WORCTRL", 0xFB),
-        ("FREND1", 0x56),
-        ("FREND0", 0x10),   # PA_POWER 0: PATABLE[0]
-        ("FSCAL3", 0xE9),
-        ("FSCAL2", 0x2A),
-        ("FSCAL1", 0x00),
-        ("FSCAL0", 0x1F),
-        ("TEST2", 0x81),
-        ("TEST1", 0x35),
-        ("TEST0", 0x09),
-    ]
-    info = {
-        "freq_actual_hz": fw * xtal / (1 << 16),
-        "rate_actual_bps": rate,
-        "deviation_actual_hz": dev,
-        "rx_bw_actual_hz": bw,
-    }
-    assert abs(info["freq_actual_hz"] - p["freq_hz"]) < 500, info
-    assert abs(rate - p["data_rate_bps"]) / p["data_rate_bps"] < 0.01, info
-    return regs, info
-
-
-def emit_phy_h(s: dict) -> str:
-    regs, info = phy_registers(s)
-    p = s["phy"]
-    lines = [
-        f"/* {BANNER} */",
-        "/* CC1101 settings for the shared PHY (01-architecture.md section 3).",
-        f" * {p['freq_hz'] / 1e6:.4f} MHz (actual {info['freq_actual_hz'] / 1e6:.6f}),"
-        f" {info['rate_actual_bps']:.1f} bps GFSK,",
-        f" * deviation {info['deviation_actual_hz'] / 1e3:.2f} kHz,"
-        f" RX bandwidth {info['rx_bw_actual_hz'] / 1e3:.2f} kHz,"
-        f" sync 0x{p['sync_word']:04X} (30/32), CRC-16, whitening. */",
-        "#ifndef RNET_PHY_H",
-        "#define RNET_PHY_H",
+    assert (sync >> 8) and (sync & 0xFF), "RadioLib rejects a 0x00 sync byte"
+    return "\n".join([
+        f"// {BANNER}",
+        "#pragma once",
         "",
-        "#include <stdint.h>",
+        "#include <cstdint>",
         "",
-        f"#define RNET_SCHEMA_VERSION {s['schema_version']}u",
-        f"#define RNET_SCHEMA_HASH 0x{schema_hash(s):04X}u",
-        f"#define RNET_PHY_FREQ_HZ {p['freq_hz']}u",
-        f"#define RNET_PHY_DATA_RATE_BPS {p['data_rate_bps']}u",
-        f"#define RNET_PHY_SYNC_WORD 0x{p['sync_word']:04X}u",
-        f"#define RNET_PHY_MAX_PAYLOAD {s['frame']['max_payload']}u",
-        f"#define RNET_PHY_RX_WINDOW_MS {p['rx_window_ms']}u",
-        f"#define RNET_PHY_UPLINK_JITTER_PCT {p['uplink_jitter_pct']}u",
-        "#define RNET_CC1101_RSSI_OFFSET 74 /* dB, 38.4 kBaud (SWRS061I table 31) */",
+        "namespace rnet::phy",
+        "{",
+        f"inline constexpr uint8_t schema_version = {s['schema_version']};",
+        f"inline constexpr uint16_t schema_hash = 0x{schema_hash(s):04X};",
+        f"inline constexpr float frequency_mhz = {p['freq_hz'] / 1e6:.4f}f;",
+        f"inline constexpr float bit_rate_kbps = {p['data_rate_bps'] / 1e3:.1f}f;",
+        f"inline constexpr float deviation_khz = {p['deviation_hz'] / 1e3:.1f}f;",
+        f"inline constexpr float rx_bandwidth_khz = {p['rx_bw_hz'] / 1e3:.3f}f;",
+        f"inline constexpr uint16_t preamble_bits = {8 * p['preamble_bytes']};",
+        f"inline constexpr uint8_t sync_word_high = 0x{sync >> 8:02X};",
+        f"inline constexpr uint8_t sync_word_low = 0x{sync & 0xFF:02X};",
+        "inline constexpr bool sync_word_sent_twice = true;",
+        f"inline constexpr bool crc16_enabled = {str(p['crc16']).lower()};",
+        f"inline constexpr bool whitening_enabled = {str(p['whitening']).lower()};",
+        f"inline constexpr uint8_t max_packet_length = {s['frame']['max_payload']};",
+        f"inline constexpr uint32_t rx_window_ms = {p['rx_window_ms']};",
+        f"inline constexpr uint8_t uplink_jitter_percent = {p['uplink_jitter_pct']};",
+        "} // namespace rnet::phy",
         "",
-        "/* {address, value} pairs, written in order after SRES. PATABLE[0] is per",
-        " * node (TX power cap) and is not part of this table. */",
-        f"#define RNET_CC1101_NREGS {len(regs)}u",
-        "static const uint8_t rnet_cc1101_regs[RNET_CC1101_NREGS][2] = {",
-    ]
-    for name, val in regs:
-        lines.append(f"    {{0x{CC1101_REG[name]:02X}, 0x{val:02X}}}, /* {name} */")
-    lines += ["};", "", "#endif", ""]
-    return "\n".join(lines)
-
-
+    ])
 
 
 # ---------------------------------------------------------------------------
@@ -244,113 +117,132 @@ def check_schema(s: dict) -> None:
             assert any(f["name"] == "duration_s" for f in m["fields"]), f"{name}: needs duration_s"
 
 
-def _c_literal(v: int, ctype: str, signed: bool, bits: int) -> str:
-    if signed:
-        if v >= 1 << (bits - 1):
-            v -= 1 << bits
-        return f"(({ctype})({v}))"
-    return f"(({ctype})0x{v:X}u)"
+ACRONYM_TABLE = [
+    "//",
+    "// acronym  meaning (schema field and wire names)",
+    "// rnet     home radio network (this protocol)",
+    "// mic      message integrity code: truncated AES-CMAC",
+    "// ack      acknowledgement",
+    "// rx       receive",
+    "// dl       downlink (gateway to node)",
+    "// rh       relative humidity",
+    "// vbat     battery voltage",
+    "// vpanel   solar panel voltage",
+    "// fw       firmware",
+    "// prev     previous report interval",
+    "// dir      wind direction",
+    "// tlv      type-length-value",
+    "//",
+]
 
 
-def emit_msgs_h(s: dict) -> str:
-    L = [f"/* {BANNER} */", "#ifndef RNET_MSGS_H", "#define RNET_MSGS_H", "",
-         "#include <stddef.h>", "#include <stdint.h>", "", "#ifdef __cplusplus", 'extern "C" {', "#endif", ""]
+def _snake(name: str) -> str:
+    return name.lower()
+
+
+def _cpp_literal(v: int, ctype: str, signed: bool, bits: int) -> str:
+    if signed and v >= 1 << (bits - 1):
+        v -= 1 << bits
+    return f"static_cast<{ctype}>({v})" if signed else f"static_cast<{ctype}>(0x{v:X}u)"
+
+
+def _field_chart(m: dict) -> list[str]:
+    rows = [("offset", "field", "type", "scale", "unit", "invalid")]
+    off = 0
+    for f in m["fields"]:
+        size = TYPES[f["type"]][0]
+        inv = f"0x{f['invalid'] & ((1 << (8 * size)) - 1):X}" if "invalid" in f else ""
+        unit = f.get("unit", "") + (f" x {f['convert']}" if "convert" in f else "")
+        rows.append((str(off), f["name"], f["type"], str(f.get("scale", "")), unit, inv))
+        off += size
+    widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
+    return ["// " + "  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip() for r in rows]
+
+
+def emit_msgs_hpp(s: dict) -> str:
     fr = s["frame"]
-    L += ["/* ---- frame (01-architecture.md section 4) ---- */",
-          f"#define RNET_FRAME_VERSION {fr['version']}u",
-          f"#define RNET_MAX_PAYLOAD {fr['max_payload']}u",
-          f"#define RNET_MIC_LEN {fr['mic_len']}u",
-          "#define RNET_HEADER_LEN 10u /* without ack_ctr */",
-          f"#define RNET_COUNTER_PERSIST_EVERY {fr['counter_persist_every']}u",
-          f'#define RNET_KEY_LABEL "{fr["key_derivation"]["label"]}"']
+    L = [f"// {BANNER}"] + ACRONYM_TABLE + ["#pragma once", "", "#include <cstddef>", "#include <cstdint>", "",
+         "namespace rnet", "{", "",
+         f"inline constexpr uint8_t frame_version = {fr['version']};",
+         f"inline constexpr std::size_t max_payload = {fr['max_payload']};",
+         f"inline constexpr std::size_t mic_length = {fr['mic_len']};",
+         "inline constexpr std::size_t header_length_without_ack = 10;",
+         f"inline constexpr uint32_t counter_persist_every = {fr['counter_persist_every']};",
+         f'inline constexpr char key_label[] = "{fr["key_derivation"]["label"]}";', "", "namespace control_bits", "{"]
     for bit, spec in fr["ctrl_bits"].items():
         if "width" in spec:
-            L.append(f"#define RNET_CTRL_{_upper(bit)}_SHIFT {spec['shift']}u")
+            L.append(f"inline constexpr uint8_t {bit}_shift = {spec['shift']};")
         else:
-            L.append(f"#define RNET_CTRL_{_upper(bit)} (1u << {spec['shift']})")
-    L += ["", "/* ---- node types ---- */"]
+            L.append(f"inline constexpr uint8_t {bit} = 1u << {spec['shift']};")
+    L += ["} // namespace control_bits", "", "namespace node", "{"]
     for name, nt in s["node_types"].items():
-        L.append(f"#define RNET_NODE_{_upper(name)} 0x{nt['id']:02X}u")
+        L.append(f"inline constexpr uint8_t {name} = 0x{nt['id']:02X};")
         for k, v in nt.get("consts", {}).items():
-            L.append(f"#define RNET_NODE_{_upper(name)}_{_upper(k)} {v}u")
-    L += ["", "/* ---- enums ---- */"]
+            L.append(f"inline constexpr uint32_t {name}_{k} = {v};")
+    L += ["} // namespace node", ""]
     for ename, vals in s["enums"].items():
+        L.append(f"enum class {ename} : uint8_t {{")
         for k, v in vals.items():
-            L.append(f"#define RNET_{_upper(ename)}_{_upper(k)} {v}u")
-    L += ["", "/* ---- CONFIG TLV keys ---- */"]
+            L.append(f"    {k} = {v},")
+        L += ["};", ""]
+    L += ["namespace config_key", "{"]
     for k, spec in s["config_keys"].items():
-        L.append(f"#define RNET_CFG_{_upper(k)} 0x{spec['id']:02X}u /* {spec['type']} */")
-    L += ["", "/* ---- message types ---- */"]
+        L.append(f"inline constexpr uint8_t {k} = 0x{spec['id']:02X};")
+    L += ["} // namespace config_key", "", "namespace message_type", "{"]
     for name, m in s["messages"].items():
-        L.append(f"#define RNET_MSG_{name} 0x{m['id']:02X}u")
+        L.append(f"inline constexpr uint8_t {_snake(name)} = 0x{m['id']:02X};")
+    L += ["} // namespace message_type"]
     for name, m in concrete_messages(s):
-        low = name.lower()
         n = payload_len(m)
-        L += ["", f"/* ---- {name} (0x{m['id']:02X}, {m['dir']}link, {n} bytes) ---- */",
-              f"#define RNET_{name}_LEN {n}u", f"#define RNET_{name}_NFIELDS {len(m['fields'])}u"]
+        L += [""] + _field_chart(m) + [f"struct {_snake(name)} {{",
+              f"    static constexpr uint8_t id = 0x{m['id']:02X};",
+              f"    static constexpr std::size_t length = {n};",
+              f"    static constexpr std::size_t field_count = {len(m['fields'])};"]
         for f in m["fields"]:
             size, ctype, signed, _ = TYPES[f["type"]]
             if "invalid" in f:
-                L.append(f"#define RNET_{name}_{_upper(f['name'])}_INVALID "
-                         f"{_c_literal(f['invalid'], ctype, signed, 8 * size)}")
+                L.append(f"    static constexpr {ctype} {f['name']}_invalid = "
+                         f"{_cpp_literal(f['invalid'], ctype, signed, 8 * size)};")
             for bit, pos in f.get("bits", {}).items():
-                L.append(f"#define RNET_{name}_{_upper(f['name'])}_{_upper(bit)} (1u << {pos})")
-        L.append("typedef struct {")
+                L.append(f"    static constexpr uint8_t {f['name']}_{bit} = 1u << {pos};")
+        L.append("")
         for f in m["fields"]:
             ctype = TYPES[f["type"]][1]
-            note = []
-            if "scale" in f and f["scale"] != 1:
-                note.append(f"x{f['scale']}")
-            if "unit" in f:
-                note.append(f["unit"])
-            if "convert" in f:
-                note.append(f"x node const {f['convert']}")
-            if "note" in f:
-                note.append(f["note"])
-            L.append(f"    {ctype} {f['name']};" + (f" /* {', '.join(note)} */" if note else ""))
-        L += [f"}} rnet_{low}_t;", "",
-              f"/* Writes RNET_{name}_LEN bytes; returns that length. */",
-              f"size_t rnet_{low}_pack(const rnet_{low}_t *m, uint8_t *buf);",
-              "/* Reads up to len bytes. A longer payload's tail is ignored; fields past a",
-              " * shorter one are set to their invalid value (or 0). Returns the number of",
-              " * fields present (ADR-0001 D3). */",
-              f"size_t rnet_{low}_unpack(rnet_{low}_t *m, const uint8_t *buf, size_t len);"]
-    L += ["", "#ifdef __cplusplus", "}", "#endif", "", "#endif", ""]
+            init = f" = {f['name']}_invalid" if "invalid" in f else "{}"
+            L.append(f"    {ctype} {f['name']}{init};")
+        L += ["", "    std::size_t pack(uint8_t *buffer) const;",
+              "    std::size_t unpack(const uint8_t *buffer, std::size_t buffer_length);", "};"]
+    L += ["", "} // namespace rnet", ""]
     return "\n".join(L)
 
 
-def emit_msgs_c(s: dict) -> str:
-    L = [f"/* {BANNER} */", '#include "rnet_msgs.h"', ""]
+def emit_msgs_cpp(s: dict) -> str:
+    L = [f"// {BANNER}", '#include "rnet_msgs.hpp"', "", "namespace rnet", "{"]
     for name, m in concrete_messages(s):
-        low = name.lower()
-        L.append(f"_Static_assert(RNET_{name}_LEN == {payload_len(m)}u, \"{name} size\");")
-    L.append("")
-    for name, m in concrete_messages(s):
-        low = name.lower()
-        L += [f"size_t rnet_{low}_pack(const rnet_{low}_t *m, uint8_t *buf)", "{"]
+        cls = _snake(name)
+        L += ["", f"std::size_t {cls}::pack(uint8_t *buffer) const", "{"]
         off = 0
         for f in m["fields"]:
             size, ctype, signed, _ = TYPES[f["type"]]
-            src = f"(uint{8 * size}_t)m->{f['name']}" if signed else f"m->{f['name']}"
+            src = f"static_cast<uint{8 * size}_t>({f['name']})" if signed else f["name"]
             for i in range(size):
                 shift = f" >> {8 * i}" if i else ""
-                L.append(f"    buf[{off + i}] = (uint8_t)({src}{shift});")
+                L.append(f"    buffer[{off + i}] = static_cast<uint8_t>({src}{shift});")
             off += size
-        L += [f"    return {off}u;", "}", "",
-              f"size_t rnet_{low}_unpack(rnet_{low}_t *m, const uint8_t *buf, size_t len)", "{",
-              "    size_t n = 0;"]
+        L += [f"    return length;", "}", "",
+              f"std::size_t {cls}::unpack(const uint8_t *buffer, std::size_t buffer_length)", "{",
+              f"    *this = {cls}{{}};", "    std::size_t fields_read = 0;"]
         off = 0
         for f in m["fields"]:
             size, ctype, signed, _ = TYPES[f["type"]]
             utype = f"uint{8 * size}_t"
-            parts = " | ".join(f"({utype})((uint32_t)buf[{off + i}] << {8 * i})" if i else f"({utype})buf[{off}]"
+            parts = " | ".join(f"(uint32_t{{buffer[{off + i}]}} << {8 * i})" if i else f"uint32_t{{buffer[{off}]}}"
                                for i in range(size))
-            dflt = f"RNET_{name}_{_upper(f['name'])}_INVALID" if "invalid" in f else "0"
-            L += [f"    if (len >= {off + size}u) {{",
-                  f"        m->{f['name']} = ({ctype})({utype})({parts});",
-                  "        n++;", "    } else {", f"        m->{f['name']} = {dflt};", "    }"]
+            L += [f"    if (buffer_length < {off + size}) {{", "        return fields_read;", "    }",
+                  f"    {f['name']} = static_cast<{ctype}>(static_cast<{utype}>({parts}));", "    fields_read++;"]
             off += size
-        L += ["    return n;", "}", ""]
+        L += ["    return fields_read;", "}"]
+    L += ["", "} // namespace rnet", ""]
     return "\n".join(L)
 
 
@@ -488,32 +380,29 @@ def emit_vectors_json(s: dict) -> str:
     return json.dumps(vectors(s), indent=2) + "\n"
 
 
-def emit_vectors_h(s: dict) -> str:
+def emit_vectors_hpp(s: dict) -> str:
     v = vectors(s)
 
     def arr(h: str) -> str:
-        b = bytes.fromhex(h)
-        return "{" + ", ".join(f"0x{x:02X}" for x in b) + "}" if b else "{0}"
+        return "{" + ", ".join(f"0x{x:02X}" for x in bytes.fromhex(h)) + "}"
 
-    L = [f"/* {BANNER} */", "/* Golden vectors (test/vectors/frames.json) for the C tests. */",
-         "#ifndef RNET_VECTORS_H", "#define RNET_VECTORS_H", "", "#include <stdint.h>", "",
-         f"static const uint8_t vec_master_key[16] = {arr(v['master_key'])};", "",
-         "typedef struct { uint16_t node_id; uint8_t node_type; uint8_t key[16]; } vec_key_t;",
-         "static const vec_key_t vec_keys[] = {"]
+    L = [f"// {BANNER}"] + ACRONYM_TABLE + ["#pragma once", "", "#include <array>", "#include <cstdint>",
+         "#include <vector>", "", "namespace vectors", "{",
+         f"inline const std::array<uint8_t, 16> master_key = {arr(v['master_key'])};", "",
+         "struct derived_key {", "    uint16_t node_id;", "    uint8_t node_type;", "    std::array<uint8_t, 16> key;",
+         "};", "inline const derived_key derived_keys[] = {"]
     for k in v["keys"]:
-        L.append(f"    {{0x{k['node_id']:04X}u, 0x{k['node_type']:02X}u, {arr(k['key'])}}},")
-    L += ["};", "",
-          "typedef struct { const char *desc; uint8_t key[16]; uint8_t ctrl, net_id; uint16_t node_id;",
-          "    uint8_t node_type; uint32_t ctr; uint8_t msg_type; int32_t ack_ctr; /* -1 = none */",
-          "    uint8_t payload[64]; uint8_t payload_len; uint8_t frame[64]; uint8_t frame_len; } vec_frame_t;",
-          "static const vec_frame_t vec_frames[] = {"]
+        L.append(f"    {{0x{k['node_id']:04X}, 0x{k['node_type']:02X}, {arr(k['key'])}}},")
+    L += ["};", "", "inline constexpr int32_t no_ack = -1;", "", "struct frame {", "    const char *description;",
+          "    std::array<uint8_t, 16> key;", "    uint8_t control;", "    uint8_t net_id;", "    uint16_t node_id;",
+          "    uint8_t node_type;", "    uint32_t counter;", "    uint8_t message_type;", "    int32_t ack_counter;",
+          "    std::vector<uint8_t> payload;", "    std::vector<uint8_t> bytes;", "};", "inline const frame frames[] = {"]
     for f in v["frames"]:
-        pl, fl = bytes.fromhex(f["payload"]), bytes.fromhex(f["frame"])
-        L.append(f'    {{"{f["desc"]}", {arr(f["key"])}, 0x{f["ctrl"]:02X}u, 0x{f["net_id"]:02X}u, '
-                 f'0x{f["node_id"]:04X}u, 0x{f["node_type"]:02X}u, 0x{f["ctr"]:08X}u, '
-                 f'0x{s["messages"][f["msg"]]["id"]:02X}u, {f["ack_ctr"] if f["ack_ctr"] is not None else -1}, '
-                 f'{arr(f["payload"])}, {len(pl)}u, {arr(f["frame"])}, {len(fl)}u}},')
-    L += ["};", "", "#endif", ""]
+        L.append(f'    {{"{f["desc"]}", {arr(f["key"])}, 0x{f["ctrl"]:02X}, 0x{f["net_id"]:02X}, '
+                 f'0x{f["node_id"]:04X}, 0x{f["node_type"]:02X}, 0x{f["ctr"]:08X}, '
+                 f'0x{s["messages"][f["msg"]]["id"]:02X}, {f["ack_ctr"] if f["ack_ctr"] is not None else "no_ack"}, '
+                 f'{arr(f["payload"])}, {arr(f["frame"])}}},')
+    L += ["};", "} // namespace vectors", ""]
     return "\n".join(L)
 
 
@@ -521,13 +410,13 @@ def emit_vectors_h(s: dict) -> str:
 def outputs(s: dict) -> dict[Path, str]:
     check_schema(s)
     return {
-        ROOT / "lib/rnet/gen/rnet_phy.h": emit_phy_h(s),
-        ROOT / "lib/rnet/gen/rnet_msgs.h": emit_msgs_h(s),
-        ROOT / "lib/rnet/gen/rnet_msgs.c": emit_msgs_c(s),
+        ROOT / "lib/rnet/gen/rnet_phy.hpp": emit_phy_hpp(s),
+        ROOT / "lib/rnet/gen/rnet_msgs.hpp": emit_msgs_hpp(s),
+        ROOT / "lib/rnet/gen/rnet_msgs.cpp": emit_msgs_cpp(s),
         ROOT / "tools/rnet_py/rnet_msgs.py": emit_py(s),
         ROOT / "docs/generated/messages.md": emit_md(s),
         ROOT / "test/vectors/frames.json": emit_vectors_json(s),
-        ROOT / "test/vectors/frames.h": emit_vectors_h(s),
+        ROOT / "test/vectors/frames.hpp": emit_vectors_hpp(s),
     }
 
 

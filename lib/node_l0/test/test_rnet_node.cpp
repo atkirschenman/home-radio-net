@@ -1,125 +1,137 @@
-/* Identity record and uplink counter over an in-memory EEPROM. */
-#include <string.h>
+#include <cstring>
 
-#include "node_l0/rnet_node.h"
-#include "rnet/rnet.h"
+#include "node_l0/rnet_node.hpp"
 #include "unity.h"
 
-#define BASE 0x08080000u
-#define SIZE 2048u
-
-static uint32_t mem[SIZE / 4];
-static bool fail_writes;
-
-static uint32_t rd(void *ctx, uint32_t addr)
+namespace
 {
-    (void)ctx;
-    return mem[(addr - BASE) / 4u];
+
+constexpr uint32_t eeprom_base = 0x08080000u;
+constexpr uint32_t eeprom_size = 2048u;
+constexpr uint8_t weather_acurite = 0x01;
+
+uint32_t eeprom_words[eeprom_size / 4];
+bool eeprom_writes_fail;
+
+uint32_t read_word(void *, uint32_t address)
+{
+    return eeprom_words[(address - eeprom_base) / 4u];
 }
 
-static bool wr(void *ctx, uint32_t addr, uint32_t word)
+bool write_word(void *, uint32_t address, uint32_t word)
 {
-    (void)ctx;
-    if (fail_writes) {
+    if (eeprom_writes_fail) {
         return false;
     }
-    mem[(addr - BASE) / 4u] = word;
+    eeprom_words[(address - eeprom_base) / 4u] = word;
     return true;
 }
 
-static const nl0_ee_backend_t be = {rd, wr, 0};
+const nl0_ee_backend_t eeprom = {read_word, write_word, nullptr};
 
-void setUp(void)
+void erase_eeprom()
 {
-    memset(mem, 0, sizeof mem); /* erased L0 data EEPROM reads 0 */
-    fail_writes = false;
-}
-void tearDown(void) {}
-
-static void test_blank_gives_test_identity(void)
-{
-    nl0_identity_t id;
-    nl0_identity_load(&be, BASE, 0x01, 0x12345678u, &id);
-    TEST_ASSERT_FALSE(id.provisioned);
-    TEST_ASSERT_EQUAL_HEX16(0x1234 ^ 0x5678, id.node_id);
-    TEST_ASSERT_EQUAL_HEX8(0x01, id.node_type);
-    uint8_t k[16];
-    rnet_derive_key(nl0_test_master_key, id.node_id, 0x01, k);
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(k, id.key, 16);
-
-    nl0_identity_load(&be, BASE, 0x01, 0xFFFF0000u, &id); /* would be 0xFFFF: reserved */
-    TEST_ASSERT_EQUAL_HEX16(0xFFFE, id.node_id);
+    std::memset(eeprom_words, 0, sizeof eeprom_words);
 }
 
-static void test_provisioned_record(void)
+} // namespace
+
+void setUp()
 {
-    nl0_identity_t in = {0x0042, 0x03, 0x5A, {0}, true};
-    for (int i = 0; i < 16; i++) {
-        in.key[i] = (uint8_t)(0xA0 + i);
+    erase_eeprom();
+    eeprom_writes_fail = false;
+}
+void tearDown() {}
+
+using namespace nl0;
+
+void test_blank_eeprom_gives_test_identity()
+{
+    node_identity identity =
+        load_identity_or_test_identity(eeprom, eeprom_base, weather_acurite, 0x12345678u);
+    TEST_ASSERT_FALSE(identity.provisioned);
+    TEST_ASSERT_EQUAL_HEX16(0x1234 ^ 0x5678, identity.node_id);
+    TEST_ASSERT_EQUAL_HEX8(weather_acurite, identity.node_type);
+    const rnet::aes_key expected_key =
+        rnet::derive_node_key(rnet::test_master_key, identity.node_id, weather_acurite);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected_key.data(), identity.key.data(), 16);
+
+    identity = load_identity_or_test_identity(eeprom, eeprom_base, weather_acurite, 0xFFFF0000u);
+    TEST_ASSERT_EQUAL_HEX16(0xFFFE, identity.node_id);
+}
+
+void test_provisioned_record_is_used_and_corruption_detected()
+{
+    node_identity provisioned;
+    provisioned.node_id = 0x0042;
+    provisioned.node_type = 0x03;
+    provisioned.net_id = 0x5A;
+    for (std::size_t i = 0; i < provisioned.key.size(); i++) {
+        provisioned.key[i] = static_cast<uint8_t>(0xA0 + i);
     }
-    uint32_t w[NL0_ID_WORDS];
-    nl0_identity_record(&in, w);
-    memcpy(mem, w, sizeof w);
+    const auto record = identity_record(provisioned);
+    std::memcpy(eeprom_words, record.data(), sizeof record);
 
-    nl0_identity_t out;
-    nl0_identity_load(&be, BASE, 0x01, 0, &out);
-    TEST_ASSERT_TRUE(out.provisioned);
-    TEST_ASSERT_EQUAL_HEX16(0x0042, out.node_id);
-    TEST_ASSERT_EQUAL_HEX8(0x03, out.node_type); /* the record wins over the build's type */
-    TEST_ASSERT_EQUAL_HEX8(0x5A, out.net_id);
-    TEST_ASSERT_EQUAL_HEX8_ARRAY(in.key, out.key, 16);
+    node_identity loaded = load_identity_or_test_identity(eeprom, eeprom_base, weather_acurite, 0);
+    TEST_ASSERT_TRUE(loaded.provisioned);
+    TEST_ASSERT_EQUAL_HEX16(0x0042, loaded.node_id);
+    TEST_ASSERT_EQUAL_HEX8(0x03, loaded.node_type);
+    TEST_ASSERT_EQUAL_HEX8(0x5A, loaded.net_id);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(provisioned.key.data(), loaded.key.data(), 16);
 
-    mem[3] ^= 1u; /* corrupt one key word: CRC fails -> test identity */
-    nl0_identity_load(&be, BASE, 0x01, 0x00000007u, &out);
-    TEST_ASSERT_FALSE(out.provisioned);
-    TEST_ASSERT_EQUAL_HEX16(7, out.node_id);
+    eeprom_words[3] ^= 1u;
+    loaded = load_identity_or_test_identity(eeprom, eeprom_base, weather_acurite, 7);
+    TEST_ASSERT_FALSE(loaded.provisioned);
+    TEST_ASSERT_EQUAL_HEX16(7, loaded.node_id);
 }
 
-static void test_counter_never_repeats_across_resets(void)
+void test_counter_never_repeats_across_resets()
 {
-    nl0_counter_t c;
-    nl0_counter_init(&c, &be, BASE);
-    uint32_t ctr = 0;
-    for (uint32_t i = 0; i <= 300u; i++) {
-        TEST_ASSERT_TRUE(nl0_counter_take(&c, &ctr));
-        TEST_ASSERT_EQUAL_UINT32(i, ctr);
+    uplink_counter counter;
+    counter.load(eeprom, eeprom_base);
+    uint32_t value = 0;
+    for (uint32_t expected = 0; expected <= 300u; expected++) {
+        TEST_ASSERT_TRUE(counter.take_next(value));
+        TEST_ASSERT_EQUAL_UINT32(expected, value);
     }
-    nl0_counter_init(&c, &be, BASE); /* reset after sending 300 */
-    TEST_ASSERT_TRUE(nl0_counter_take(&c, &ctr));
-    TEST_ASSERT_EQUAL_UINT32(512u, ctr); /* stored 256, resumes at 256 + 256 */
+    counter.load(eeprom, eeprom_base);
+    TEST_ASSERT_TRUE(counter.take_next(value));
+    TEST_ASSERT_EQUAL_UINT32(512u, value);
 
-    nl0_counter_init(&c, &be, BASE); /* reset straight away: 512 was stored first */
-    TEST_ASSERT_TRUE(nl0_counter_take(&c, &ctr));
-    TEST_ASSERT_EQUAL_UINT32(768u, ctr);
+    counter.load(eeprom, eeprom_base);
+    TEST_ASSERT_TRUE(counter.take_next(value));
+    TEST_ASSERT_EQUAL_UINT32(768u, value);
 }
 
-static void test_counter_refuses_when_store_fails(void)
+void test_counter_refuses_when_the_required_store_fails()
 {
-    nl0_counter_t c;
-    nl0_counter_init(&c, &be, BASE);
-    fail_writes = true;
-    uint32_t ctr = 99;
-    TEST_ASSERT_FALSE(nl0_counter_take(&c, &ctr)); /* 0 must be stored before use */
-    fail_writes = false;
-    TEST_ASSERT_TRUE(nl0_counter_take(&c, &ctr));
-    TEST_ASSERT_EQUAL_UINT32(0, ctr);
-    fail_writes = true;
-    TEST_ASSERT_TRUE(nl0_counter_take(&c, &ctr)); /* 1: no store due */
+    uplink_counter counter;
+    counter.load(eeprom, eeprom_base);
+    uint32_t value = 99;
+    eeprom_writes_fail = true;
+    TEST_ASSERT_FALSE(counter.take_next(value));
+    eeprom_writes_fail = false;
+    TEST_ASSERT_TRUE(counter.take_next(value));
+    TEST_ASSERT_EQUAL_UINT32(0, value);
+    eeprom_writes_fail = true;
+    TEST_ASSERT_TRUE(counter.take_next(value));
+    TEST_ASSERT_EQUAL_UINT32(1, value);
 }
 
-static void test_layout_fits_region(void)
+void test_layout_fits_the_rnet_region()
 {
-    TEST_ASSERT_TRUE(NL0_ID_OFFSET + NL0_ID_WORDS * 4u <= NL0_CTR_OFFSET);
-    TEST_ASSERT_TRUE(NL0_CTR_OFFSET + nl0_ee_ring_size(NL0_CTR_SLOTS, 1) <= NL0_RNET_REGION_END);
+    TEST_ASSERT_TRUE(identity_offset + identity_words * 4u <= counter_ring_offset);
+    TEST_ASSERT_TRUE(counter_ring_offset + nl0_ee_ring_size(counter_ring_slots, 1) <=
+                     rnet_region_end);
 }
 
-int main(void)
+int main()
 {
     UNITY_BEGIN();
-    RUN_TEST(test_blank_gives_test_identity);
-    RUN_TEST(test_provisioned_record);
+    RUN_TEST(test_blank_eeprom_gives_test_identity);
+    RUN_TEST(test_provisioned_record_is_used_and_corruption_detected);
     RUN_TEST(test_counter_never_repeats_across_resets);
-    RUN_TEST(test_counter_refuses_when_store_fails);
-    RUN_TEST(test_layout_fits_region);
+    RUN_TEST(test_counter_refuses_when_the_required_store_fails);
+    RUN_TEST(test_layout_fits_the_rnet_region);
     return UNITY_END();
 }

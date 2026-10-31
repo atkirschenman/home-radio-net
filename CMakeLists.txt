@@ -1,11 +1,16 @@
 # home-radio-net: host tests for the shared libraries, and a target smoke build
 # of lib/node_l0 (ADR-0002 T2). Presets: CMakePresets.json.
 cmake_minimum_required(VERSION 3.25)
-project(home_radio_net C)
+project(home_radio_net C CXX)
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
+# New shared code is C++17 (owner, 2026-10-31: C++ wherever it can be);
+# platform.c, log.c and ee_ring.c are still C99.
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 set(HRN_UNITY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/unity CACHE INTERNAL "")
 
 if(NOT CMAKE_CROSSCOMPILING)

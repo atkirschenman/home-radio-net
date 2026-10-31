@@ -6,11 +6,11 @@
 set(NODE_L0_DIR ${CMAKE_CURRENT_LIST_DIR} CACHE INTERNAL "")
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/node_l0.cmake)
 
-# lib/rnet: frames/keys (rnet_node.c) and the generated CC1101 table (cc1101.c)
+# lib/rnet: frames, keys and the PHY parameters (rnet_node.cpp, radio.cpp)
 if(NOT TARGET rnet)
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../rnet ${CMAKE_CURRENT_BINARY_DIR}/rnet)
 endif()
-add_library(node_l0_portable STATIC src/ee_ring.c src/cc1101.c src/rnet_node.c)
+add_library(node_l0_portable STATIC src/ee_ring.c src/rnet_node.cpp)
 target_include_directories(node_l0_portable PUBLIC include)
 target_link_libraries(node_l0_portable PUBLIC rnet)
 
@@ -29,21 +29,26 @@ if(CMAKE_CROSSCOMPILING)
   target_compile_definitions(node_l0_vendor PUBLIC STM32L051xx USE_FULL_LL_DRIVER)
   target_compile_options(node_l0_vendor PRIVATE -w)
 
-  add_library(node_l0 STATIC src/platform.c src/log.c)
+  # RadioLib's radio side (the crypto part comes with lib/rnet), vendored.
+  set(RL ${CMAKE_CURRENT_LIST_DIR}/../vendor/RadioLib/src)
+  add_library(radiolib_cc1101 STATIC ${RL}/Hal.cpp ${RL}/Module.cpp
+    ${RL}/modules/CC1101/CC1101.cpp ${RL}/protocols/PhysicalLayer/PhysicalLayer.cpp
+    ${RL}/utils/Utils.cpp ${RL}/utils/CRC.cpp)
+  target_include_directories(radiolib_cc1101 SYSTEM PUBLIC ${RL})
+  target_compile_options(radiolib_cc1101 PRIVATE -w)
+  target_link_libraries(radiolib_cc1101 PUBLIC node_l0_vendor)
+
+  add_library(node_l0 STATIC src/platform.c src/log.c src/radio.cpp)
   # Linked as an object into every image, so it wins over libnosys.
   target_sources(node_l0 INTERFACE ${CMAKE_CURRENT_LIST_DIR}/src/syscalls.c)
-  target_link_libraries(node_l0 PUBLIC node_l0_portable node_l0_vendor)
+  target_link_libraries(node_l0 PUBLIC node_l0_portable node_l0_vendor radiolib_cc1101)
   target_compile_options(node_l0 PRIVATE -Wall -Wextra -Wshadow -Werror)
 elseif(BUILD_TESTING)
   add_executable(test_ee_ring test/test_ee_ring.c ${HRN_UNITY_DIR}/unity.c)
   target_include_directories(test_ee_ring PRIVATE ${HRN_UNITY_DIR})
   target_link_libraries(test_ee_ring PRIVATE node_l0_portable)
   add_test(NAME node_l0.ee_ring COMMAND test_ee_ring)
-  add_executable(test_cc1101 test/test_cc1101.c ${HRN_UNITY_DIR}/unity.c)
-  target_include_directories(test_cc1101 PRIVATE ${HRN_UNITY_DIR})
-  target_link_libraries(test_cc1101 PRIVATE node_l0_portable)
-  add_test(NAME node_l0.cc1101 COMMAND test_cc1101)
-  add_executable(test_rnet_node test/test_rnet_node.c ${HRN_UNITY_DIR}/unity.c)
+  add_executable(test_rnet_node test/test_rnet_node.cpp ${HRN_UNITY_DIR}/unity.c)
   target_include_directories(test_rnet_node PRIVATE ${HRN_UNITY_DIR})
   target_link_libraries(test_rnet_node PRIVATE node_l0_portable)
   add_test(NAME node_l0.rnet_node COMMAND test_rnet_node)

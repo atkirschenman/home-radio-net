@@ -1,6 +1,6 @@
 # ADR-0001: One protocol schema, generated code for every device
 
-- **Status:** Accepted (owner, 2026-10-10). Work-order step 1 (`schema/rnet.toml`) drafted, awaiting schema review
+- **Status:** Accepted (owner, 2026-10-10). Schema reviewed and accepted (owner, 2026-10-31): sync word `0xB54E`, `HEALTH` fields as drafted. Amended 2026-10-31 (owner): generated and library code is C++17; AES/CMAC and the CC1101 driver come from RadioLib (known libraries over our own)
 - **Date:** 2026-10-09
 - **Affects:** every project: weather_station (node firmware), smart-garden-system (node firmware), soil monitors, the ESPHome gateway, host tools (provisioning, sniffer)
 - **Builds on:** `01-architecture.md` N-6 (frame format), N-9 (message set), N-10 (code layout), N-12 (Home Assistant representation)
