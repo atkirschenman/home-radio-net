@@ -230,7 +230,7 @@ int16_t cc1101_radio::receive(uint8_t *buffer, uint32_t timeout_ms, received_pac
     }
     status = chip_.receive(buffer, rnet::phy::max_packet_length, timeout_ms);
     if (status == RADIOLIB_ERR_NONE) {
-        packet.length = chip_.getPacketLength();
+        packet.length = chip_.getPacketLength(false);
         packet.rssi_dbm = chip_.getRSSI();
         packet.lqi = chip_.getLQI();
     }
