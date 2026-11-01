@@ -10,6 +10,8 @@
 //
 // each GDO output is driven low then high by its IOCFG register;
 // a correctly wired GDO pin follows on exactly its own ESP32 pin
+//
+// chip select   CSN high: MISO released (pulled up)   CSN low: MISO low (chip ready)
 #include <Arduino.h>
 #include <SPI.h>
 
@@ -92,6 +94,23 @@ uint32_t watched_pin_levels()
     return levels;
 }
 
+void report_chip_select()
+{
+    SPI.end();
+    pinMode(miso_pin, INPUT_PULLUP);
+    digitalWrite(csn_pin, HIGH);
+    delay(2);
+    const int miso_when_deselected = digitalRead(miso_pin);
+    digitalWrite(csn_pin, LOW);
+    delay(2);
+    const int miso_when_selected = digitalRead(miso_pin);
+    digitalWrite(csn_pin, HIGH);
+    SPI.begin(sck_pin, miso_pin, mosi_pin, -1);
+    const bool chip_select_works = miso_when_deselected == HIGH && miso_when_selected == LOW;
+    Serial.printf("chip select: MISO deselected=%d selected=%d (expect 1, 0) %s\n", miso_when_deselected,
+                  miso_when_selected, chip_select_works ? "ok" : "FAULT: CSN not reaching the chip");
+}
+
 void report_pins_following(const char *gdo_name, uint8_t iocfg_register)
 {
     write_register(iocfg_register, gdo_drive_low);
@@ -135,6 +154,8 @@ void setup()
 
 void loop()
 {
+    report_chip_select();
+    Serial.printf("version=0x%02X (expect 0x14 or 0x04)\n", read_status_register(status_register_version));
     report_pins_following("GDO0", register_iocfg0);
     report_pins_following("GDO2", register_iocfg2);
     Serial.println("expected: GDO0 -> 21, GDO2 -> 22");
