@@ -47,7 +47,7 @@ radio_net:
   uart_id: bridge_uart
   master_key: !secret rnet_master_key
   nodes:
-    - node_id: 0x0001
+    - node_id: 0x3D18   # the bench AcuRite board, unprovisioned (id from its chip)
       type: weather_acurite
       name: Weather Station
   frames_received:

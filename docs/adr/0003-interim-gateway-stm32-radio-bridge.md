@@ -74,7 +74,7 @@ One line per event, `\n`-terminated, 115200 8N1, 3.3 V logic. Readable in any se
 |---|---|---|
 | 1 | Fix BOOT0 on the bridge board (pin 44 → 10 kΩ R11 → GND) | owner, bench |
 | 2 | `radio_bridge` image (B2, B3); check it by hand in a serial terminal with the node on its link test and on the real image. **Link test done 2026-11-01** through the ESP32 (`tools/radio_bridge_terminal`): 149 packets in 150 s with no gaps, `send` → `sent 0`, bad lines → `unknown_line` | |
-| 3 | ESPHome component stub: UART transport, parse, MIC, replay, log; gateway device entities (frames received, rejected, bridge online). Done when `esphome compile` builds and the log on the bench ESP32 shows verified frames. **2026-11-01:** compiles on ESPHome 2026.10.1 (ESP-IDF) with `lib/rnet` built from the repo through `library.json`; reads the bridge on the bench; verified frames wait for the node's real image | ✋ before entities |
+| 3 | ESPHome component stub: UART transport, parse, MIC, replay, log; gateway device entities (frames received, rejected, bridge online). Done when `esphome compile` builds and the log on the bench ESP32 shows verified frames. **2026-11-01:** compiles on ESPHome 2026.10.1 (ESP-IDF) with `lib/rnet` built from the repo through `library.json`; reads the bridge on the bench. **Done 2026-11-01:** the weather node's real image (node 0x3D18, test key) → bridge → ESP32: `weather_report` and `health` verified (MIC ok, fresh counters 768/769, repeats dropped as duplicates, schema hash 0x42B1 on both ends), −47 dBm | ✋ before entities |
 | 4 | Entities from the generated tables for `HEALTH` and `WEATHER_REPORT`; one weather station shows up in Home Assistant | |
 | 5 | Downlinks: `RX_OPEN` window, `TIME`, `CONFIG_SET`, using `send` | |
 
