@@ -14,6 +14,7 @@
 //   status <uptime_s> <received> <crc_errors> <schema_hash>
 #include "radio_net.h"
 
+#include <cmath>
 #include <cstdlib>
 #include <optional>
 
@@ -33,6 +34,9 @@ constexpr uint32_t bridge_status_period_milliseconds = 30000;
 constexpr uint32_t bridge_offline_after_milliseconds = 3 * bridge_status_period_milliseconds + 5000;
 constexpr uint8_t link_test_marker_first = 'L';
 constexpr uint8_t link_test_marker_second = 'T';
+constexpr uint32_t reports_missed_before_offline = 3;
+constexpr uint32_t offline_margin_seconds = 30;
+constexpr uint32_t milliseconds_per_second = 1000;
 
 std::vector<std::string> split_words(const std::string &line)
 {
@@ -79,6 +83,58 @@ std::optional<std::vector<uint8_t>> parse_hex_bytes(const std::string &hex)
 bool is_link_test_packet(const std::vector<uint8_t> &bytes)
 {
     return bytes.size() >= 2 && bytes[0] == link_test_marker_first && bytes[1] == link_test_marker_second;
+}
+
+std::size_t raw_type_size(raw_type type)
+{
+    switch (type) {
+    case raw_type::u8:
+    case raw_type::i8:
+        return 1;
+    case raw_type::u16:
+    case raw_type::i16:
+        return 2;
+    case raw_type::u32:
+    case raw_type::i32:
+        return 4;
+    }
+    return 0;
+}
+
+uint32_t read_little_endian(const uint8_t *bytes, std::size_t size)
+{
+    uint32_t value = 0;
+    for (std::size_t index = 0; index < size; index++) {
+        value |= static_cast<uint32_t>(bytes[index]) << (8 * index);
+    }
+    return value;
+}
+
+int64_t signed_value(uint32_t raw, raw_type type)
+{
+    switch (type) {
+    case raw_type::i8:
+        return static_cast<int8_t>(raw);
+    case raw_type::i16:
+        return static_cast<int16_t>(raw);
+    case raw_type::i32:
+        return static_cast<int32_t>(raw);
+    default:
+        return raw;
+    }
+}
+
+std::optional<float> decode_field(const field_sensor &field, const rnet::parsed_frame &frame)
+{
+    const std::size_t size = raw_type_size(field.type);
+    if (field.offset + size > frame.payload_length) {
+        return std::nullopt;
+    }
+    const uint32_t raw = read_little_endian(frame.payload + field.offset, size);
+    if (field.has_invalid && raw == field.invalid) {
+        return NAN;
+    }
+    return static_cast<float>(signed_value(raw, field.type)) * field.scale;
 }
 
 const char *verdict_name(rnet::replay_verdict verdict)
@@ -151,6 +207,23 @@ void radio_net_component::set_bridge_online_sensor(binary_sensor::BinarySensor *
     bridge_online_sensor_ = online;
 }
 
+void radio_net_component::add_field_sensor(std::size_t node_index, uint8_t message_id, uint8_t offset,
+                                           raw_type type, float scale, bool has_invalid, uint32_t invalid,
+                                           sensor::Sensor *sensor)
+{
+    field_sensors_.push_back({node_index, message_id, offset, type, scale, has_invalid, invalid, sensor});
+}
+
+void radio_net_component::set_node_signal_sensor(std::size_t node_index, sensor::Sensor *signal)
+{
+    nodes_.at(node_index).signal_sensor = signal;
+}
+
+void radio_net_component::set_node_online_sensor(std::size_t node_index, binary_sensor::BinarySensor *online)
+{
+    nodes_.at(node_index).online_sensor = online;
+}
+
 float radio_net_component::get_setup_priority() const
 {
     return setup_priority::DATA;
@@ -167,12 +240,18 @@ void radio_net_component::setup()
     if (bridge_online_sensor_ != nullptr) {
         bridge_online_sensor_->publish_state(false);
     }
+    for (registered_node &node : nodes_) {
+        if (node.online_sensor != nullptr) {
+            node.online_sensor->publish_state(false);
+        }
+    }
 }
 
 void radio_net_component::loop()
 {
     read_bridge_characters();
     update_bridge_online();
+    update_nodes_online();
 }
 
 void radio_net_component::dump_config()
@@ -292,10 +371,34 @@ void radio_net_component::handle_verified_frame(registered_node &node, const rne
     const rnet::frame_header &header = frame.header;
     ESP_LOGD(tag, "%s counter=%u message=0x%02X rssi=%d lqi=%u", node.name.c_str(),
              static_cast<unsigned>(header.counter), header.message_type, packet.rssi_dbm, packet.lqi);
+    node.heard = true;
+    node.last_frame_milliseconds = millis();
+    if (node.signal_sensor != nullptr) {
+        node.signal_sensor->publish_state(static_cast<float>(packet.rssi_dbm));
+    }
     if (header.message_type == rnet::weather_report::id) {
         log_weather_report(node, frame);
+        rnet::weather_report report;
+        report.unpack(frame.payload, frame.payload_length);
+        if (report.interval_seconds > 0) {
+            node.report_interval_seconds = report.interval_seconds;
+        }
     } else if (header.message_type == rnet::health::id) {
         log_health(node, frame);
+    }
+    publish_fields(static_cast<std::size_t>(&node - nodes_.data()), frame);
+}
+
+void radio_net_component::publish_fields(std::size_t node_index, const rnet::parsed_frame &frame)
+{
+    for (const field_sensor &field : field_sensors_) {
+        if (field.node_index != node_index || field.message_id != frame.header.message_type) {
+            continue;
+        }
+        const auto value = decode_field(field, frame);
+        if (value) {
+            field.sensor->publish_state(*value);
+        }
     }
 }
 
@@ -333,6 +436,23 @@ void radio_net_component::update_bridge_online()
     const bool online = bridge_heard_ && millis() - last_bridge_line_milliseconds_ < bridge_offline_after_milliseconds;
     if (!bridge_online_sensor_->has_state() || bridge_online_sensor_->state != online) {
         bridge_online_sensor_->publish_state(online);
+    }
+}
+
+void radio_net_component::update_nodes_online()
+{
+    const uint32_t now = millis();
+    for (registered_node &node : nodes_) {
+        if (node.online_sensor == nullptr) {
+            continue;
+        }
+        const uint32_t offline_after_milliseconds =
+            (reports_missed_before_offline * node.report_interval_seconds + offline_margin_seconds) *
+            milliseconds_per_second;
+        const bool online = node.heard && now - node.last_frame_milliseconds < offline_after_milliseconds;
+        if (!node.online_sensor->has_state() || node.online_sensor->state != online) {
+            node.online_sensor->publish_state(online);
+        }
     }
 }
 

@@ -9,3 +9,36 @@ NODE_TYPES = {
     "garden": 0x10,
     "soil": 0x20,
 }
+
+NODE_TYPE_CONSTANTS = {
+    "weather_acurite": {'rain_nm_per_tip': 254000},
+    "weather_ws69": {'rain_nm_per_tip': 300000},
+    "weather_misol": {'rain_nm_per_tip': 279400},
+    "garden": {},
+    "soil": {},
+}
+
+UPLINK_MESSAGES = [
+    {"name": "HEALTH", "id": 0x01, "node_types": ['weather_acurite', 'weather_ws69', 'weather_misol', 'garden', 'soil'],
+     "fields": [
+         {'name': 'battery_voltage', 'offset': 0, 'type': 'u16', 'unit': 'mV', 'home_assistant': {'device_class': 'voltage', 'state_class': 'measurement', 'entity_category': 'diagnostic'}, 'scale': 1},
+         {'name': 'panel_voltage', 'offset': 2, 'type': 'u16', 'unit': 'mV', 'home_assistant': {'device_class': 'voltage', 'state_class': 'measurement', 'entity_category': 'diagnostic'}, 'scale': 1, 'invalid': 65535},
+         {'name': 'board_temperature', 'offset': 4, 'type': 'i16', 'unit': '°C', 'home_assistant': {'device_class': 'temperature', 'state_class': 'measurement', 'entity_category': 'diagnostic'}, 'scale': 0.1, 'invalid': 32767},
+         {'name': 'downlink_rssi', 'offset': 6, 'type': 'i8', 'unit': 'dBm', 'home_assistant': {'device_class': 'signal_strength', 'entity_category': 'diagnostic'}, 'scale': 1, 'invalid': -128},
+         {'name': 'uptime', 'offset': 7, 'type': 'u32', 'unit': 's', 'home_assistant': {'device_class': 'duration', 'state_class': 'total_increasing', 'entity_category': 'diagnostic'}, 'scale': 1},
+     ]},
+    {"name": "WEATHER_REPORT", "id": 0x10, "node_types": ['weather_acurite', 'weather_ws69', 'weather_misol'],
+     "fields": [
+         {'name': 'interval_seconds', 'offset': 0, 'type': 'u16', 'unit': 's', 'home_assistant': {'entity_category': 'diagnostic'}, 'scale': 1},
+         {'name': 'wind_mean', 'offset': 2, 'type': 'u16', 'unit': 'm/s', 'home_assistant': {'device_class': 'wind_speed', 'state_class': 'measurement', 'accuracy_decimals': 1}, 'scale': 0.01},
+         {'name': 'wind_gust', 'offset': 4, 'type': 'u16', 'unit': 'm/s', 'home_assistant': {'device_class': 'wind_speed', 'state_class': 'measurement', 'accuracy_decimals': 1}, 'scale': 0.01},
+         {'name': 'wind_lull', 'offset': 6, 'type': 'u16', 'unit': 'm/s', 'home_assistant': {'device_class': 'wind_speed', 'state_class': 'measurement', 'accuracy_decimals': 1}, 'scale': 0.01},
+         {'name': 'wind_direction', 'offset': 8, 'type': 'u16', 'unit': '°', 'home_assistant': {'device_class': 'wind_direction', 'state_class': 'measurement_angle', 'accuracy_decimals': 0}, 'scale': 0.1, 'invalid': 65535},
+         {'name': 'wind_direction_at_gust', 'offset': 10, 'type': 'u16', 'unit': '°', 'home_assistant': {'device_class': 'wind_direction', 'state_class': 'measurement_angle', 'accuracy_decimals': 0}, 'scale': 0.1, 'invalid': 65535},
+         {'name': 'rain_tips', 'offset': 12, 'type': 'u32', 'unit': 'mm', 'home_assistant': {'device_class': 'precipitation', 'state_class': 'total_increasing', 'accuracy_decimals': 2}, 'convert': 'rain_nm_per_tip'},
+         {'name': 'temperature', 'offset': 16, 'type': 'i16', 'unit': '°C', 'home_assistant': {'device_class': 'temperature', 'state_class': 'measurement', 'accuracy_decimals': 1}, 'scale': 0.01, 'invalid': 32767},
+         {'name': 'relative_humidity', 'offset': 18, 'type': 'u16', 'unit': '%', 'home_assistant': {'device_class': 'humidity', 'state_class': 'measurement', 'accuracy_decimals': 0}, 'scale': 0.01, 'invalid': 65535},
+         {'name': 'pressure', 'offset': 20, 'type': 'u32', 'unit': 'hPa', 'home_assistant': {'device_class': 'atmospheric_pressure', 'state_class': 'measurement', 'accuracy_decimals': 1}, 'scale': 0.01, 'invalid': 4294967295},
+         {'name': 'battery_voltage', 'offset': 24, 'type': 'u16', 'unit': 'mV', 'home_assistant': {'device_class': 'voltage', 'state_class': 'measurement', 'entity_category': 'diagnostic'}, 'scale': 1},
+     ]},
+]

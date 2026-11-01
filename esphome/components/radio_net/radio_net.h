@@ -17,11 +17,29 @@
 namespace esphome::radio_net
 {
 
+enum class raw_type : uint8_t { u8, u16, u32, i8, i16, i32 };
+
+struct field_sensor {
+    std::size_t node_index = 0;
+    uint8_t message_id = 0;
+    uint8_t offset = 0;
+    raw_type type = raw_type::u8;
+    float scale = 1;
+    bool has_invalid = false;
+    uint32_t invalid = 0;
+    sensor::Sensor *sensor = nullptr;
+};
+
 struct registered_node {
     uint16_t node_id = 0;
     uint8_t node_type = 0;
     std::string name;
     rnet::receive_counter counter;
+    sensor::Sensor *signal_sensor = nullptr;
+    binary_sensor::BinarySensor *online_sensor = nullptr;
+    bool heard = false;
+    uint32_t last_frame_milliseconds = 0;
+    uint32_t report_interval_seconds = 60;
 };
 
 struct received_radio_packet {
@@ -38,6 +56,10 @@ class radio_net_component : public Component, public uart::UARTDevice
     void set_frames_received_sensor(sensor::Sensor *counter);
     void set_frames_rejected_sensor(sensor::Sensor *counter);
     void set_bridge_online_sensor(binary_sensor::BinarySensor *online);
+    void add_field_sensor(std::size_t node_index, uint8_t message_id, uint8_t offset, raw_type type, float scale,
+                          bool has_invalid, uint32_t invalid, sensor::Sensor *sensor);
+    void set_node_signal_sensor(std::size_t node_index, sensor::Sensor *signal);
+    void set_node_online_sensor(std::size_t node_index, binary_sensor::BinarySensor *online);
 
     void setup() override;
     void loop() override;
@@ -55,9 +77,12 @@ class radio_net_component : public Component, public uart::UARTDevice
     void count_received_frame();
     void count_rejected_frame();
     void update_bridge_online();
+    void update_nodes_online();
+    void publish_fields(std::size_t node_index, const rnet::parsed_frame &frame);
 
     rnet::aes_key master_key_{};
     std::vector<registered_node> nodes_;
+    std::vector<field_sensor> field_sensors_;
     std::string line_;
     uint32_t frames_received_ = 0;
     uint32_t frames_rejected_ = 0;

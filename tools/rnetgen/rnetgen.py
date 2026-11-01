@@ -411,10 +411,39 @@ def emit_vectors_hpp(schema: dict) -> str:
     return "\n".join(lines)
 
 
+def home_assistant_fields(message: dict) -> list[dict]:
+    fields, offset = [], 0
+    for field in message["fields"]:
+        size = FIELD_TYPES[field["type"]][0]
+        if "home_assistant" in field and "unit" in field:
+            entry = {"name": field["name"], "offset": offset, "type": field["type"], "unit": field["unit"],
+                     "home_assistant": field["home_assistant"]}
+            if "scale" in field:
+                entry["scale"] = field["scale"]
+            if "convert" in field:
+                entry["convert"] = field["convert"]
+            if "invalid" in field:
+                entry["invalid"] = field["invalid"]
+            fields.append(entry)
+        offset += size
+    return fields
+
+
 def emit_esphome_tables(schema: dict) -> str:
     lines = [f"# {BANNER}", "", f"SCHEMA_HASH = 0x{schema_hash(schema):04X}", "", "NODE_TYPES = {"]
     lines += [f'    "{name}": 0x{node_type["id"]:02X},' for name, node_type in schema["node_types"].items()]
-    lines += ["}", ""]
+    lines += ["}", "", "NODE_TYPE_CONSTANTS = {"]
+    lines += [f'    "{name}": {node_type.get("constants", {})!r},' for name, node_type in schema["node_types"].items()]
+    lines += ["}", "", "UPLINK_MESSAGES = ["]
+    for name, message in fixed_layout_messages(schema):
+        fields = home_assistant_fields(message)
+        if message["direction"] != "uplink" or not fields:
+            continue
+        lines.append(f'    {{"name": "{name}", "id": 0x{message["id"]:02X}, "node_types": {message["node_types"]!r},')
+        lines.append('     "fields": [')
+        lines += [f"         {field!r}," for field in fields]
+        lines.append("     ]},")
+    lines += ["]", ""]
     return "\n".join(lines)
 
 

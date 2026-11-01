@@ -11,6 +11,9 @@ esphome:
   name: radio-gateway
   friendly_name: Radio Gateway
   min_version: 2026.10.0
+  devices:
+    - id: weather_station
+      name: Weather Station
 
 esp32:
   board: esp32dev
@@ -50,6 +53,7 @@ radio_net:
     - node_id: 0x3D18   # the bench AcuRite board, unprovisioned (id from its chip)
       type: weather_acurite
       name: Weather Station
+      device_id: weather_station
   frames_received:
     name: Frames received
   frames_rejected:
