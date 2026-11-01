@@ -59,7 +59,11 @@ One line per event, `\n`-terminated, 115200 8N1, 3.3 V logic. Readable in any se
 | USART1 RX (PA10, log header) | `GPIO17` (UART2 TX) |
 | GND | `GND` |
 
-- **Power: open question Q1 below.** Until it's answered, the board stays on its own batteries.
+| ESP32 `3V3` | battery **+** pad (either bank) |
+| ESP32 `GND` | battery **−** pad (the GND above) |
+
+- **Power (owner, 2026-11-01: plug-in, not AA cells, since Wi-Fi would flatten them):** the ESP32 runs from a USB supply, and its 3V3 pin feeds the bridge board's **battery pads, with the cells removed**. That's the board's normal input path: bank polyfuse (100 mA) → reverse-polarity FET → TPS63900 (1.8–5.5 V in), so nothing is back-fed. The bridge draws ≈ 25 mA receiving, inside the polyfuse and the DevKitC regulator's margin. 3.3 V reads as "battery full", so the charger stays off (ADR-0002), and the bridge image doesn't run it anyway.
+- Not the panel input: a USB 5 V supply (up to 5.25 V) sits on the 5.1 V panel clamp. Not 5 V into the battery pads: too close to the TPS63900's 5.9 V absolute maximum.
 - The board's **BOOT0 fault** (it starts ST's ROM bootloader after power-up, so it only runs when started over SWD) must be fixed first. An unattended gateway has to start on its own after a power cut.
 
 ## Work order
@@ -76,7 +80,7 @@ One line per event, `\n`-terminated, 115200 8N1, 3.3 V logic. Readable in any se
 
 | # | Question | Leaning |
 |---|---|---|
-| Q1 | How is the bridge board powered? (a) its own 2-cell pack; (b) the ESP32's 3V3 into the board's 3V3 (J5 pin 1) with no batteries fitted; (c) a USB supply into the battery pads | (b), once the schematic confirms that driving 3V3 with the buck-boost unpowered back-feeds nothing; (a) on the bench until then |
+| Q1 | How is the bridge board powered? | **Answered (owner, 2026-11-01): plug-in power.** Proposed: ESP32 on USB, its 3V3 into the bridge's battery pads, cells removed (B5) |
 | Q2 | Master key for the bench: the published test key until provisioning (O-4) exists? | Yes; the real key goes in `secrets.yaml` with provisioning |
 
 ## Considered
