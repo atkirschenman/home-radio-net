@@ -19,6 +19,7 @@
 #include <optional>
 
 #include "esphome/core/hal.h"
+#include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 #include "rnet_phy.hpp"
 
@@ -37,6 +38,7 @@ constexpr uint8_t link_test_marker_second = 'T';
 constexpr uint32_t reports_missed_before_offline = 3;
 constexpr uint32_t offline_margin_seconds = 30;
 constexpr uint32_t milliseconds_per_second = 1000;
+constexpr const char *replay_window_preference_name = "radio_net replay window";
 
 std::vector<std::string> split_words(const std::string &line)
 {
@@ -231,6 +233,7 @@ float radio_net_component::get_setup_priority() const
 
 void radio_net_component::setup()
 {
+    restore_replay_windows();
     if (frames_received_sensor_ != nullptr) {
         frames_received_sensor_->publish_state(0);
     }
@@ -361,6 +364,7 @@ void radio_net_component::handle_received_packet(const received_radio_packet &pa
         return;
     }
     node->counter.accept(header.counter);
+    node->stored_counter.save(&header.counter);
     handle_verified_frame(*node, frame, packet);
 }
 
@@ -436,6 +440,21 @@ void radio_net_component::update_bridge_online()
     const bool online = bridge_heard_ && millis() - last_bridge_line_milliseconds_ < bridge_offline_after_milliseconds;
     if (!bridge_online_sensor_->has_state() || bridge_online_sensor_->state != online) {
         bridge_online_sensor_->publish_state(online);
+    }
+}
+
+void radio_net_component::restore_replay_windows()
+{
+    for (registered_node &node : nodes_) {
+        const uint32_t key = fnv1_hash_extend(fnv1_hash_extend(fnv1_hash(replay_window_preference_name), node.node_id),
+                                              node.node_type);
+        node.stored_counter = global_preferences->make_preference<uint32_t>(key, true);
+        uint32_t last_accepted = 0;
+        if (node.stored_counter.load(&last_accepted)) {
+            node.counter.accept(last_accepted);
+            ESP_LOGI(tag, "%s replay window restored: last accepted counter %u", node.name.c_str(),
+                     static_cast<unsigned>(last_accepted));
+        }
     }
 }
 

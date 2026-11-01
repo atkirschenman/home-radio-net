@@ -12,6 +12,7 @@
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/core/component.h"
+#include "esphome/core/preferences.h"
 #include "rnet/rnet.hpp"
 
 namespace esphome::radio_net
@@ -35,6 +36,7 @@ struct registered_node {
     uint8_t node_type = 0;
     std::string name;
     rnet::receive_counter counter;
+    ESPPreferenceObject stored_counter;
     sensor::Sensor *signal_sensor = nullptr;
     binary_sensor::BinarySensor *online_sensor = nullptr;
     bool heard = false;
@@ -78,6 +80,7 @@ class radio_net_component : public Component, public uart::UARTDevice
     void count_rejected_frame();
     void update_bridge_online();
     void update_nodes_online();
+    void restore_replay_windows();
     void publish_fields(std::size_t node_index, const rnet::parsed_frame &frame);
 
     rnet::aes_key master_key_{};
