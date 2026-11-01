@@ -411,6 +411,13 @@ def emit_vectors_hpp(schema: dict) -> str:
     return "\n".join(lines)
 
 
+def emit_esphome_tables(schema: dict) -> str:
+    lines = [f"# {BANNER}", "", f"SCHEMA_HASH = 0x{schema_hash(schema):04X}", "", "NODE_TYPES = {"]
+    lines += [f'    "{name}": 0x{node_type["id"]:02X},' for name, node_type in schema["node_types"].items()]
+    lines += ["}", ""]
+    return "\n".join(lines)
+
+
 def outputs(schema: dict) -> dict[Path, str]:
     check_schema(schema)
     return {
@@ -421,6 +428,7 @@ def outputs(schema: dict) -> dict[Path, str]:
         ROOT / "docs/generated/messages.md": emit_markdown(schema),
         ROOT / "test/vectors/frames.json": emit_vectors_json(schema),
         ROOT / "test/vectors/frames.hpp": emit_vectors_hpp(schema),
+        ROOT / "esphome/components/radio_net/rnet_tables.py": emit_esphome_tables(schema),
     }
 
 

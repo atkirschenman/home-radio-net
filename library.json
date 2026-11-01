@@ -1,0 +1,22 @@
+{
+  "name": "home-radio-net",
+  "version": "0.15.0",
+  "description": "rnet frames, keys and replay windows for the ESPHome gateway (lib/rnet on RadioLib's AES-128/CMAC)",
+  "license": "MIT",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "srcDir": ".",
+    "includeDir": "lib/rnet/include",
+    "srcFilter": [
+      "-<*>",
+      "+<lib/rnet/src/*.cpp>",
+      "+<lib/rnet/gen/*.cpp>",
+      "+<lib/vendor/RadioLib/src/utils/Cryptography.cpp>"
+    ],
+    "flags": [
+      "-I lib/rnet/gen",
+      "-I lib/vendor/RadioLib/src"
+    ]
+  }
+}

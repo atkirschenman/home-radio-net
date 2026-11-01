@@ -1,0 +1,66 @@
+# Home radio network gateway: ESP32 + a weather board as the radio (ADR-0003).
+# Paste into the ESPHome dashboard in Home Assistant. secrets.yaml needs
+# wifi_ssid, wifi_password, api_encryption_key, ota_password and rnet_master_key.
+#
+#   ESP32 DevKitC   weather board (radio_bridge image)
+#   3V3             battery + pad, cells removed
+#   GND             battery - pad
+#   GPIO16 (RX)     PA9  USART1 TX
+#   GPIO17 (TX)     PA10 USART1 RX
+esphome:
+  name: radio-gateway
+  friendly_name: Radio Gateway
+  min_version: 2026.10.0
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+external_components:
+  - source: github://atkirschenman/home-radio-net@feat/gateway-bridge
+    path: esphome/components
+    components: [radio_net]
+    refresh: 1h
+
+uart:
+  id: bridge_uart
+  rx_pin: GPIO16
+  tx_pin: GPIO17
+  baud_rate: 115200
+
+radio_net:
+  uart_id: bridge_uart
+  master_key: !secret rnet_master_key
+  nodes:
+    - node_id: 0x0001
+      type: weather_acurite
+      name: Weather Station
+  frames_received:
+    name: Frames received
+  frames_rejected:
+    name: Frames rejected
+  bridge_online:
+    name: Radio bridge
+
+sensor:
+  - platform: wifi_signal
+    name: Wi-Fi signal
+    entity_category: diagnostic
+  - platform: uptime
+    name: Uptime
+    entity_category: diagnostic

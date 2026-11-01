@@ -1,6 +1,6 @@
 # ADR-0003: Interim gateway: a weather board as the radio, ESPHome over UART
 
-- **Status:** Proposed. Hardware direction from the owner (2026-11-01): "CC1101 → STM32 → ESP32 for now, until we have a purpose-made board". The details below wait for acceptance
+- **Status:** Accepted (owner, 2026-11-01: "take the next steps"). Hardware direction from the owner the same day: "CC1101 → STM32 → ESP32 for now, until we have a purpose-made board"
 - **Date:** 2026-11-01
 - **Affects:** the gateway (`esphome/components/radio_net/`), weather_station (the bridge image runs on its board), smart-garden-system and soil monitors (their nodes talk to this gateway)
 - **Builds on:** `01-architecture.md` N-4 (ESP32 + CC1101 + ESPHome), N-10 (code layout), N-12 (Home Assistant sub-devices); ADR-0001 (generated code, the gateway stub); ADR-0002 (toolchain, bench tools)
@@ -74,7 +74,7 @@ One line per event, `\n`-terminated, 115200 8N1, 3.3 V logic. Readable in any se
 |---|---|---|
 | 1 | Fix BOOT0 on the bridge board (pin 44 → 10 kΩ R11 → GND) | owner, bench |
 | 2 | `radio_bridge` image (B2, B3); check it by hand in a serial terminal with the node on its link test and on the real image. **Link test done 2026-11-01** through the ESP32 (`tools/radio_bridge_terminal`): 149 packets in 150 s with no gaps, `send` → `sent 0`, bad lines → `unknown_line` | |
-| 3 | ESPHome component stub: UART transport, parse, MIC, replay, log; gateway device entities (frames received, rejected, bridge online). Done when `esphome compile` builds and the log on the bench ESP32 shows verified frames | ✋ before entities |
+| 3 | ESPHome component stub: UART transport, parse, MIC, replay, log; gateway device entities (frames received, rejected, bridge online). Done when `esphome compile` builds and the log on the bench ESP32 shows verified frames. **2026-11-01:** compiles on ESPHome 2026.10.1 (ESP-IDF) with `lib/rnet` built from the repo through `library.json`; reads the bridge on the bench; verified frames wait for the node's real image | ✋ before entities |
 | 4 | Entities from the generated tables for `HEALTH` and `WEATHER_REPORT`; one weather station shows up in Home Assistant | |
 | 5 | Downlinks: `RX_OPEN` window, `TIME`, `CONFIG_SET`, using `send` | |
 
