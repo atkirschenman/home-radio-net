@@ -1,6 +1,6 @@
 # ADR-0001: One protocol schema, generated code for every device
 
-- **Status:** Accepted (owner, 2026-10-10). Work-order step 1 (`schema/rnet.toml`) drafted, awaiting schema review
+- **Status:** Accepted (owner, 2026-10-10). Schema reviewed and accepted (owner, 2026-10-31): sync word `0xB54E`, `HEALTH` fields as drafted. Amended 2026-10-31 (owner): generated and library code is C++17; AES/CMAC and the CC1101 driver come from RadioLib (known libraries over our own). Amended 2026-10-31 (owner): schema names in whole words (`WEATHER_REPORT`, `battery_voltage`, …); the `WX_REPORT` example below shows the original draft
 - **Date:** 2026-10-09
 - **Affects:** every project: weather_station (node firmware), smart-garden-system (node firmware), soil monitors, the ESPHome gateway, host tools (provisioning, sniffer)
 - **Builds on:** `01-architecture.md` N-6 (frame format), N-9 (message set), N-10 (code layout), N-12 (Home Assistant representation)
@@ -73,9 +73,9 @@ fields = [
 
 | Output | Path | Used by |
 |---|---|---|
-| C99 header + pack/unpack functions (explicit byte shifts, no packed structs, `_Static_assert` on sizes) | `lib/rnet/gen/rnet_msgs.h/.c`, `rnet_phy.h` | Every STM32 node, and the gateway's C++ |
+| C99 header + pack/unpack functions (explicit byte shifts, no packed structs, `_Static_assert` on sizes) | `lib/rnet/gen/rnet_msgs.h/.c`, `rnet_phy.h` (now C++17: `rnet_messages.hpp/.cpp`, `rnet_phy.hpp`) | Every STM32 node, and the gateway's C++ |
 | Gateway entity tables: per-message decoders → (field, scale, unit, HA metadata); Python config tables for `__init__.py` | `esphome/components/radio_net/gen/` | ESPHome component |
-| Python codec | `tools/rnet_py/rnet_msgs.py` | Provisioning, sniffer, test-vector generation |
+| Python codec | `tools/rnet_py/rnet_messages.py` | Provisioning, sniffer, test-vector generation |
 | Markdown message tables | `docs/generated/messages.md` | Linked from `01-architecture.md` §7 and the project specs instead of copied |
 | **Golden test vectors** (JSON: field values → payload bytes → full frame with CMAC under a published test key) | `test/vectors/*.json` | C tests, Python tests, gateway tests: the cross-implementation check |
 

@@ -10,7 +10,8 @@ Used by every node project (weather_station, smart-garden-system, soil monitors)
 | Clocks (MSI + LSE), RTC 1 Hz wakeup + 30.5 µs timestamps, Stop, IWDG, reset cause, data EEPROM backend, delay | `include/node_l0/platform.h`, `src/platform.c` | Compile only until a board/probe exists |
 | TX-only UART log | `include/node_l0/log.h`, `src/log.c` | Compile only |
 | ST LL / CMSIS / startup (vendored, pinned) | `vendor/` (`VERSIONS.md`) | — |
-| **To come:** CC1101 driver with the generated PHY registers, rnet glue (counter persistence, `RX_OPEN` window) | | Waits for `tools/rnetgen` |
+| CC1101 radio on RadioLib: bare-metal STM32L0 RadioLib HAL (bit-banged SPI, RTC time base), send / receive window / sleep | `include/node_l0/radio.hpp`, `src/radio.cpp` | Target: weather_station AcuRite board (2026-10-31) |
+| rnet node glue: EEPROM identity record, uplink counter persisted every 256 frames | `include/node_l0/rnet_node.hpp`, `src/rnet_node.cpp` | Host: `test/test_rnet_node.cpp` |
 
 The libraries are C99; every public header has `extern "C"` guards, so C++ node applications (weather_station) include them directly. The toolchain file also sets the C++ flags (`-fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit`).
 
