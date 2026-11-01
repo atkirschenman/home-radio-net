@@ -34,8 +34,11 @@ wifi:
 captive_portal:
 
 external_components:
-  - source: github://atkirschenman/home-radio-net@feat/gateway-bridge
-    path: esphome/components
+  - source:
+      type: git
+      url: https://github.com/atkirschenman/home-radio-net
+      ref: feat/gateway-bridge
+      path: esphome/components
     components: [radio_net]
     refresh: 1h
 
