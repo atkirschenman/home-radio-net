@@ -154,7 +154,6 @@ void nl0_lowpower_init(bool debug_in_stop)
 {
     LL_PWR_EnableUltraLowPower();
     LL_PWR_EnableFastWakeUp();
-    LL_PWR_SetRegulModeLP(LL_PWR_REGU_LPMODES_LOW_POWER); /* LPSDSR: low-power regulator in Stop */
     LL_PWR_SetPowerMode(LL_PWR_MODE_STOP);
     if (debug_in_stop) {
         LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_DBGMCU);
@@ -162,13 +161,37 @@ void nl0_lowpower_init(bool debug_in_stop)
     }
 }
 
+/* RTC shadow registers after Stop (RM0377 26.4.8):
+ *
+ *   Stop ──wake──► SSR/TR/DR hold the pre-Stop time ──2 RTCCLK (61 us)──► RSF set, time current
+ *                  reading here returns stale time       read only from here on
+ */
+static void wait_for_rtc_shadow_registers(void)
+{
+    LL_RTC_DisableWriteProtection(RTC);
+    LL_RTC_ClearFlag_RS(RTC);
+    LL_RTC_EnableWriteProtection(RTC);
+    while (!LL_RTC_IsActiveFlag_RS(RTC)) {
+    }
+}
+
+/* Regulator during WFI (RM0377 6.3): LPSDSR also applies to Sleep, where it is
+ * only allowed at <= 131 kHz, so it is set for Stop alone.
+ *
+ *   mode    SLEEPDEEP  LPSDSR  used by
+ *   Stop    1          1       nl0_stop
+ *   Sleep   0          0       naps at 2 MHz (SysTick)
+ */
 void nl0_stop(void)
 {
     LL_PWR_ClearFlag_WU();
+    LL_PWR_SetRegulModeLP(LL_PWR_REGU_LPMODES_LOW_POWER);
     LL_LPM_EnableDeepSleep();
     __DSB();
     __WFI();
     LL_LPM_EnableSleep();
+    LL_PWR_SetRegulModeLP(LL_PWR_REGU_LPMODES_MAIN);
+    wait_for_rtc_shadow_registers();
 }
 
 void nl0_delay_ms(uint32_t ms)
