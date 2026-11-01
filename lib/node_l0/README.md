@@ -7,7 +7,7 @@ Used by every node project (weather_station, smart-garden-system, soil monitors)
 | Toolchain file, firmware helper (`node_l0_firmware()`: linker script, .map/.hex/.bin, size, compiler check) | `cmake/` | Target build |
 | Linker script: 64 KB / 8 KB, data EEPROM as a NOLOAD region | `ld/stm32l051x8.ld` | Target build |
 | EEPROM wear-levelled ring (pure logic, torn-write safe) | `include/node_l0/ee_ring.h`, `src/ee_ring.c` | Host: `test/test_ee_ring.c` |
-| Clocks (MSI + LSE), RTC 1 Hz wakeup + 30.5 µs timestamps, Stop, IWDG, reset cause, data EEPROM backend, delay | `include/node_l0/platform.h`, `src/platform.c` | Compile only until a board/probe exists |
+| Clocks (MSI + LSE), RTC 1 Hz wakeup + 30.5 µs timestamps, Stop, IWDG, reset cause, data EEPROM backend, delay | `include/node_l0/platform.h`, `src/platform.cpp` | Compile only until a board/probe exists |
 | TX-only UART log | `include/node_l0/log.h`, `src/log.c` | Compile only |
 | ST LL / CMSIS / startup (vendored, pinned) | `vendor/` (`VERSIONS.md`) | — |
 | CC1101 radio on RadioLib: bare-metal STM32L0 RadioLib HAL (bit-banged SPI, RTC time base), send / receive window / sleep | `include/node_l0/radio.hpp`, `src/radio.cpp` | Target: weather_station AcuRite board (2026-10-31) |

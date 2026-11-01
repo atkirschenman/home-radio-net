@@ -19,6 +19,6 @@ The **shared radio protocol, C library and ESPHome gateway** for three projects:
 - **A change here affects every project.** Bump the frame version for incompatible changes, and note in the change log which projects need updating.
 - **Every frame is authenticated** (N-3). No unauthenticated message types, ever.
 - **Garden actuation is timer-only:** there is no "on/open" message, only `GARDEN_RUN(zone, duration)` and `GARDEN_STOP`. Never add one.
-- The shared libraries are portable **C++17** (owner, 2026-10-31: C++ wherever it can be; `platform.c`, `log.c`, `ee_ring.c` are C99 until next touched): no heap, no OS, host-testable. They run on the STM32 nodes and inside the ESP32 gateway.
+- The shared libraries are portable **C++17** (owner, 2026-10-31: C++ wherever it can be; `log.c`, `ee_ring.c` are C99 until next touched): no heap, no OS, host-testable. They run on the STM32 nodes and inside the ESP32 gateway.
 - **Use known libraries over our own code** (owner, 2026-10-31): RadioLib drives the CC1101 and provides AES-128/CMAC; vendored at a pinned version.
 - **Andrew makes the calls on architecture.** Proposed items stay Proposed until he accepts them; record decisions in the spec's table and change log.

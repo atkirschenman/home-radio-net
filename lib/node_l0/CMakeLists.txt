@@ -38,7 +38,7 @@ if(CMAKE_CROSSCOMPILING)
   target_compile_options(radiolib_cc1101 PRIVATE -w)
   target_link_libraries(radiolib_cc1101 PUBLIC node_l0_vendor)
 
-  add_library(node_l0 STATIC src/platform.c src/log.c src/radio.cpp)
+  add_library(node_l0 STATIC src/platform.cpp src/log.c src/radio.cpp)
   # Linked as an object into every image, so it wins over libnosys.
   target_sources(node_l0 INTERFACE ${CMAKE_CURRENT_LIST_DIR}/src/syscalls.cpp)
   target_link_libraries(node_l0 PUBLIC node_l0_portable node_l0_vendor radiolib_cc1101)
