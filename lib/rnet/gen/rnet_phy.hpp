@@ -6,12 +6,13 @@
 namespace rnet::phy
 {
 inline constexpr uint8_t schema_version = 1;
-inline constexpr uint16_t schema_hash = 0x0670;
+inline constexpr uint16_t schema_hash = 0x42B1;
 inline constexpr float frequency_mhz = 918.5000f;
 inline constexpr float bit_rate_kbps = 38.4f;
 inline constexpr float deviation_khz = 20.0f;
 inline constexpr float rx_bandwidth_khz = 101.562f;
 inline constexpr uint16_t preamble_bits = 32;
+inline constexpr uint8_t preamble_quality_threshold_bits = 0;
 inline constexpr uint8_t sync_word_high = 0xB5;
 inline constexpr uint8_t sync_word_low = 0x4E;
 inline constexpr bool sync_word_sent_twice = true;

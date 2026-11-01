@@ -4,7 +4,7 @@ Message codec for host tools. Frames, keys and message integrity code: rnet.py.
 """
 import struct
 
-SCHEMA_HASH = 0x0670
+SCHEMA_HASH = 0x42B1
 NODE_TYPES = {'weather_acurite': {'id': 1, 'constants': {'rain_nm_per_tip': 254000}}, 'weather_ws69': {'id': 2, 'constants': {'rain_nm_per_tip': 300000}}, 'weather_misol': {'id': 3, 'constants': {'rain_nm_per_tip': 279400}}, 'garden': {'id': 16, 'constants': {}}, 'soil': {'id': 32, 'constants': {}}}
 ENUMS = {'reset_cause': {'unknown': 0, 'power_on': 1, 'brown_out': 2, 'reset_pin': 3, 'independent_watchdog': 4, 'software': 5, 'low_power': 6}}
 MESSAGE_IDS = {'HEALTH': 1, 'TIME': 2, 'CONFIG_SET': 3, 'CONFIG_GET': 4, 'CONFIG_VALUE': 5, 'WEATHER_REPORT': 16, 'GARDEN_POLL': 32, 'GARDEN_RUN': 33, 'GARDEN_STOP': 34, 'GARDEN_EVENT': 35, 'SOIL_REPORT': 48}

@@ -56,6 +56,7 @@ data_rate_bps = 38_400
 deviation_hz = 20_000
 rx_bandwidth_hz = 101_562   # nearest CC1101 step to ~100 kHz
 preamble_bytes = 4
+preamble_quality_threshold_bits = 0   # receiver only; RadioLib default (28) drops most packets
 sync_mode = "30/32"
 sync_word = 0xB54E          # accepted 2026-10-31; not the CC1101 default 0xD391
 packet_length = "variable"

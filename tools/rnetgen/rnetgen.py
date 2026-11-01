@@ -62,6 +62,7 @@ def emit_phy_hpp(schema: dict) -> str:
         f"inline constexpr float deviation_khz = {phy['deviation_hz'] / 1e3:.1f}f;",
         f"inline constexpr float rx_bandwidth_khz = {phy['rx_bandwidth_hz'] / 1e3:.3f}f;",
         f"inline constexpr uint16_t preamble_bits = {8 * phy['preamble_bytes']};",
+        f"inline constexpr uint8_t preamble_quality_threshold_bits = {phy['preamble_quality_threshold_bits']};",
         f"inline constexpr uint8_t sync_word_high = 0x{sync_word >> 8:02X};",
         f"inline constexpr uint8_t sync_word_low = 0x{sync_word & 0xFF:02X};",
         "inline constexpr bool sync_word_sent_twice = true;",

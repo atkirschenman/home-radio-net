@@ -28,6 +28,9 @@ inline int16_t configure_cc1101(CC1101 &radio, int8_t power_dbm)
                                    phy::sync_word_sent_twice);
     }
     if (status == RADIOLIB_ERR_NONE) {
+        status = radio.setPreambleLength(phy::preamble_bits, phy::preamble_quality_threshold_bits);
+    }
+    if (status == RADIOLIB_ERR_NONE) {
         status = radio.variablePacketLengthMode(phy::max_packet_length);
     }
     if (status == RADIOLIB_ERR_NONE) {
