@@ -30,10 +30,12 @@ One line per event, `\n`-terminated, 115200 8N1, 3.3 V logic. Readable in any se
 |---|---|---|
 | bridge → ESP32 | `received <rssi_dbm> <lqi> <hex bytes>` | one CRC-good packet |
 | bridge → ESP32 | `crc_error <rssi_dbm>` | a packet failed the hardware CRC (counted on the gateway device) |
+| bridge → ESP32 | `receive_error <status>` | any other read failure (RadioLib error code) |
 | bridge → ESP32 | `status <uptime_s> <received> <crc_errors> <schema_hash>` | every 30 s; the ESP32 marks the bridge offline after 3 missed |
 | bridge → ESP32 | `ready <schema_hash>` | after reset |
 | ESP32 → bridge | `send <hex bytes>` | transmit one frame now, then return to receive (downlinks, step 4) |
 | bridge → ESP32 | `sent <status>` | 0 = sent; otherwise the RadioLib error code |
+| bridge → ESP32 | `unknown_line` | answer to a line that isn't a valid `send` (bad hex, too long, unknown word) |
 
 - No checksum on the line: the CMAC already rejects any corrupted frame, and a bad hex line is dropped and counted.
 - Hex doubles the bytes; a 61-byte frame takes ≈ 11 ms at 115200 baud, inside the 120 ms downlink window (section 6.2).
@@ -71,7 +73,7 @@ One line per event, `\n`-terminated, 115200 8N1, 3.3 V logic. Readable in any se
 | # | Step | ✋ |
 |---|---|---|
 | 1 | Fix BOOT0 on the bridge board (pin 44 → 10 kΩ R11 → GND) | owner, bench |
-| 2 | `radio_bridge` image (B2, B3); check it by hand in a serial terminal with the node on its link test and on the real image | |
+| 2 | `radio_bridge` image (B2, B3); check it by hand in a serial terminal with the node on its link test and on the real image. **Link test done 2026-11-01** through the ESP32 (`tools/radio_bridge_terminal`): 149 packets in 150 s with no gaps, `send` → `sent 0`, bad lines → `unknown_line` | |
 | 3 | ESPHome component stub: UART transport, parse, MIC, replay, log; gateway device entities (frames received, rejected, bridge online). Done when `esphome compile` builds and the log on the bench ESP32 shows verified frames | ✋ before entities |
 | 4 | Entities from the generated tables for `HEALTH` and `WEATHER_REPORT`; one weather station shows up in Home Assistant | |
 | 5 | Downlinks: `RX_OPEN` window, `TIME`, `CONFIG_SET`, using `send` | |

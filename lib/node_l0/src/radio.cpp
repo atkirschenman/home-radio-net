@@ -238,6 +238,26 @@ int16_t cc1101_radio::receive(uint8_t *buffer, uint32_t timeout_ms, received_pac
     return status;
 }
 
+int16_t cc1101_radio::start_receiving()
+{
+    const int16_t status = wake_and_restore_power();
+    return status == RADIOLIB_ERR_NONE ? chip_.startReceive() : status;
+}
+
+bool cc1101_radio::packet_waiting()
+{
+    return hal_.digitalRead(radiolib_hal_l0::gdo0_pin) == radiolib_high;
+}
+
+int16_t cc1101_radio::read_packet(uint8_t *buffer, received_packet &packet)
+{
+    const int16_t status = chip_.readData(buffer, rnet::phy::max_packet_length);
+    packet.length = chip_.getPacketLength(false);
+    packet.rssi_dbm = chip_.getRSSI();
+    packet.lqi = chip_.getLQI();
+    return status;
+}
+
 void cc1101_radio::sleep()
 {
     chip_.sleep();

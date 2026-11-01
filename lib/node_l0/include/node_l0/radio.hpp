@@ -86,6 +86,9 @@ class cc1101_radio
     int16_t configure_then_sleep(int8_t power_dbm);
     int16_t send(const uint8_t *data, size_t length);
     int16_t receive(uint8_t *buffer, uint32_t timeout_ms, received_packet &packet);
+    int16_t start_receiving();
+    bool packet_waiting();
+    int16_t read_packet(uint8_t *buffer, received_packet &packet);
     void sleep();
 
   private:
