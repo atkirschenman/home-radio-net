@@ -26,6 +26,8 @@ constexpr uint32_t receive_timeout_ms = 1000;
 constexpr uint32_t summary_period_ms = 30000;
 constexpr uint16_t no_direction = 0xFFFF;
 constexpr size_t max_known_nodes = 8;
+constexpr float crystal_hz = 26e6f;
+constexpr float frequency_estimate_step_khz = crystal_hz / (1u << 14) / 1000.0f;
 
 CC1101 radio = new Module(csn_pin, gdo0_pin, RADIOLIB_NC, gdo2_pin);
 
@@ -52,7 +54,14 @@ known_node known_nodes[max_known_nodes];
 struct packet_quality {
     float rssi_dbm;
     uint8_t lqi;
+    float frequency_offset_khz;
 };
+
+float frequency_offset_khz()
+{
+    const auto estimate = static_cast<int8_t>(radio.SPIreadRegister(RADIOLIB_CC1101_REG_FREQEST));
+    return estimate * frequency_estimate_step_khz;
+}
 
 void print_link_summary()
 {
@@ -84,9 +93,10 @@ void record_link_test_packet(uint32_t sequence, uint8_t power_setting, uint16_t 
     link_stats.rssi_max = max(link_stats.rssi_max, quality.rssi_dbm);
     link_stats.have_sequence = true;
     link_stats.last_sequence = sequence;
-    Serial.printf("sequence=%lu rssi=%.1f lqi=%u power_setting=0x%02X battery=%u mV%s\n",
-                  (unsigned long)sequence, quality.rssi_dbm, quality.lqi, power_setting, battery_mv,
-                  gap ? " (gap)" : "");
+    Serial.printf("sequence=%lu rssi=%.1f lqi=%u frequency_offset=%.1f kHz power_setting=0x%02X "
+                  "battery=%u mV%s\n",
+                  (unsigned long)sequence, quality.rssi_dbm, quality.lqi, quality.frequency_offset_khz,
+                  power_setting, battery_mv, gap ? " (gap)" : "");
 }
 
 known_node *find_or_add_node(uint16_t node_id, uint8_t node_type)
@@ -195,9 +205,9 @@ bool handle_rnet_frame(const uint8_t *bytes, size_t length, packet_quality quali
     }
     const rnet::frame_header &header = frame.header;
     Serial.printf("rnet node=0x%04X type=0x%02X net=0x%02X counter=%lu message=0x%02X "
-                  "control=0x%02X rssi=%.1f lqi=%u",
+                  "control=0x%02X rssi=%.1f lqi=%u frequency_offset=%.1f kHz",
                   header.node_id, header.node_type, header.net_id, (unsigned long)header.counter, header.message_type,
-                  header.control, quality.rssi_dbm, quality.lqi);
+                  header.control, quality.rssi_dbm, quality.lqi, quality.frequency_offset_khz);
 
     const rnet::aes_key key = rnet::derive_node_key(rnet::test_master_key, header.node_id, header.node_type);
     if (!rnet::mic_is_valid(key, bytes, length)) {
@@ -270,8 +280,8 @@ void loop()
     uint8_t bytes[rnet::phy::max_packet_length];
     const int16_t status = radio.receive(bytes, sizeof bytes, receive_timeout_ms);
     if (status == RADIOLIB_ERR_NONE) {
-        handle_packet(bytes, radio.getPacketLength(),
-                      packet_quality{radio.getRSSI(), radio.getLQI()});
+        handle_packet(bytes, radio.getPacketLength(false),
+                      packet_quality{radio.getRSSI(), radio.getLQI(), frequency_offset_khz()});
     } else if (status != RADIOLIB_ERR_RX_TIMEOUT) {
         Serial.printf("receive error %d\n", status);
     }

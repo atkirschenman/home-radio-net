@@ -6,10 +6,12 @@
 // sweep plan
 //
 //   pass       frequencies                dwell   receive bandwidth
-//   sweep      900 .. 928 MHz, 0.5 MHz    1.1 s   812 kHz (overlapping steps)
+//   sweep      860 .. 960 MHz, 0.5 MHz    1.1 s   812 kHz (overlapping steps)
 //   on_channel 918.5 MHz, repeated        1 s     101.6 kHz (the protocol's)
 //
-// 928 MHz is the top of the CC1101's 779-928 MHz band (RadioLib rejects higher)
+// 860-960 MHz brackets 918.5 MHz with either radio on a 27 MHz crystal instead of
+// 26 MHz (918.5 x 27/26 = 953.8, 918.5 x 26/27 = 884.5); the build disables
+// RadioLib's 779-928 MHz range check so the synthesizer is asked anyway
 //
 // the node must be on the link-test image (one packet per second)
 #include <Arduino.h>
@@ -24,8 +26,8 @@ namespace
 
 constexpr int sck_pin = 18, miso_pin = 19, mosi_pin = 23, csn_pin = 5, gdo0_pin = 21, gdo2_pin = 22;
 constexpr int8_t receiver_power_dbm = -15;
-constexpr float sweep_start_mhz = 900.0f;
-constexpr float sweep_end_mhz = 928.0f;
+constexpr float sweep_start_mhz = 860.0f;
+constexpr float sweep_end_mhz = 960.0f;
 constexpr float sweep_step_mhz = 0.5f;
 constexpr float sweep_bandwidth_khz = 812.0f;
 constexpr uint32_t on_channel_dwell_ms = 1000;

@@ -52,7 +52,7 @@ cd ~/Documents/home-radio-net/tools/link_test/esp32 && ~/.platformio/penv/bin/pi
 | Tool | Run (from `tools/link_test`) | Shows |
 |---|---|---|
 | wiring check | `cd esp32_wiring_check && pio run -t upload -t monitor` | chip version over SPI; which ESP32 pin each GDO output drives |
-| signal sweep | `cd esp32 && pio run -e rssi_scan -t upload -t monitor` | signal level 900-928 MHz, then a live meter on the node's channel (node on its link-test image) |
+| signal sweep | `cd esp32 && pio run -e rssi_scan -t upload -t monitor` | signal level 860-960 MHz, then a live meter on the node's channel (node on its link-test image) |
 
 ## Received signal strength at 1 m
 
