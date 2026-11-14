@@ -6,7 +6,7 @@
 namespace rnet::phy
 {
 inline constexpr uint8_t schema_version = 1;
-inline constexpr uint16_t schema_hash = 0x42B1;
+inline constexpr uint16_t schema_hash = 0xCDF2;
 inline constexpr float frequency_mhz = 918.5000f;
 inline constexpr float bit_rate_kbps = 38.4f;
 inline constexpr float deviation_khz = 20.0f;

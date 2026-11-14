@@ -70,7 +70,7 @@ uplink_jitter_percent = 10  # 6.1
 # ---------------------------------------------------------------------------
 [node_types.weather_acurite]
 id = 0x01
-constants = { rain_nm_per_tip = 254000 }   # 0.01 in
+constants = { rain_nm_per_tip = 1016000 }  # 0.04 in (owner, 2026-11-14)
 
 [node_types.weather_ws69]
 id = 0x02

@@ -36,7 +36,7 @@ inline constexpr uint8_t more = 1u << 1;
 namespace node
 {
 inline constexpr uint8_t weather_acurite = 0x01;
-inline constexpr uint32_t weather_acurite_rain_nm_per_tip = 254000;
+inline constexpr uint32_t weather_acurite_rain_nm_per_tip = 1016000;
 inline constexpr uint8_t weather_ws69 = 0x02;
 inline constexpr uint32_t weather_ws69_rain_nm_per_tip = 300000;
 inline constexpr uint8_t weather_misol = 0x03;
